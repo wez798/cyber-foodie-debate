@@ -51,3 +51,8 @@ htmlcov/
 # Build output
 frontend/dist/
 frontend/build/
+
+# Secrets
+*.pem
+*.key
+secrets/

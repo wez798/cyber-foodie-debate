@@ -1,6 +1,6 @@
 # Cyber Foodie Debate - AI校园干饭辩论赛与美食擂台
 
-[![CI](https://github.com/your-team/cyber-foodie-debate/actions/workflows/ci.yml/badge.svg)](https://github.com/your-team/cyber-foodie-debate/actions)
+[![CI](https://github.com/wez798/cyber-foodie-debate/actions/workflows/ci.yml/badge.svg)](https://github.com/wez798/cyber-foodie-debate/actions)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -37,7 +37,7 @@ graph TB
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-team/cyber-foodie-debate.git
+git clone https://github.com/wez798/cyber-foodie-debate.git
 cd cyber-foodie-debate
 
 # 复制环境变量模板
@@ -104,7 +104,7 @@ cyber-foodie-debate/
 | 双Agent辩论    | 川辣派 vs 粤式养生派    | ✅ MVP      |
 | 辩论结果判定   | 自动判定获胜方+推荐菜品 | ✅ MVP      |
 | 流式响应       | SSE 实时辩论直播        | 🔄 Sprint 3 |
-| TTS语音播报    | 微软TTS朗读辩论内容     | 🔄 Sprint 3 |
+| TTS语音播报    | 微软TTS朗读辩论内容/    | 🔄 Sprint 3 |
 | 历史记录       | 辩论会话持久化          | 🔄 Sprint 3 |
 | GitHub API集成 | 自动获取commit生成梗图  | ❌ 规划中   |
 
