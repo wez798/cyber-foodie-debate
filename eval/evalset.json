@@ -1,0 +1,65 @@
+{
+  "eval_set_name": "cyber_foodie_debate_eval",
+  "version": "1.0",
+  "description": "美食辩论赛评测数据集",
+  "test_cases": [
+    {
+      "id": "TC001",
+      "input": {
+        "preference": {
+          "口味": "辣",
+          "预算": "10-20元",
+          "天气": "晴天",
+          "忌口": null
+        }
+      },
+      "expected": {
+        "status": "completed",
+        "rounds_count": 6,
+        "has_result": true,
+        "confidence_range": [0.0, 1.0]
+      }
+    },
+    {
+      "id": "TC002",
+      "input": {
+        "preference": {
+          "口味": "清淡",
+          "预算": "20-30元",
+          "天气": "雨天",
+          "忌口": "不吃香菜"
+        }
+      },
+      "expected": {
+        "status": "completed",
+        "rounds_count": 6,
+        "has_result": true,
+        "avoid_allergy": true
+      }
+    },
+    {
+      "id": "TC003",
+      "input": {
+        "preference": {
+          "口味": "随便",
+          "预算": "10元以下",
+          "天气": "很热",
+          "忌口": null
+        }
+      },
+      "expected": {
+        "status": "completed",
+        "rounds_count": 6,
+        "has_result": true,
+        "budget_constraint": "10元以下"
+      }
+    }
+  ],
+  "scoring_rubric": {
+    "functional_correctness": 40,
+    "response_quality": 25,
+    "allergy_avoidance": 15,
+    "budget_adherence": 10,
+    "response_time": 10
+  }
+}
