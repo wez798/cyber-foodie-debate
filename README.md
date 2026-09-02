@@ -11,23 +11,24 @@
 ```mermaid
 graph TB
     subgraph 前端层
-        A[用户浏览器] --> B[HTML/CSS/JS]
+        A[用户浏览器] --> B[React + TypeScript]
+        B --> C[Vite + Tailwind CSS v4 + shadcn/ui]
     end
 
     subgraph 后端服务层
-        B --> C[FastAPI API]
-        C --> D[辩论编排服务 DebateService]
-        D --> E[LLM 调用服务]
-        D --> F[TTS 语音服务]
+        C --> D[FastAPI API]
+        D --> E[辩论编排服务 DebateService]
+        E --> F[LLM 调用服务]
+        E --> G[TTS 语音服务]
     end
 
     subgraph 外部服务
-        E --> G[硅基流动 DeepSeek-V4-Flash]
-        F --> H[微软 edge-tts]
+        F --> H[硅基流动 DeepSeek-V4-Flash]
+        G --> I[微软 edge-tts]
     end
 
     subgraph 数据层
-        D --> I[JSON 会话存储]
+        E --> J[JSON 会话存储]
     end
 ```
 
@@ -53,9 +54,20 @@ pip install -r src/backend/requirements.txt
 
 # 启动后端服务
 python -m src.backend.main
-
-# 前端直接打开 src/frontend/index.html 或使用任意静态服务器
 ```
+
+另开终端启动前端：
+
+```bash
+cd src/frontend
+pnpm install
+pnpm dev
+```
+
+前端默认访问 `http://localhost:8000/api/v1`。如后端地址不同，可在启动前设置
+`VITE_API_BASE_URL`。
+
+访问 http://localhost:5173 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
 
 ### 3. Docker 一键启动
 
@@ -63,7 +75,8 @@ python -m src.backend.main
 docker-compose up --build
 ```
 
-访问 http://localhost:3000 使用前端，http://localhost:8000/docs 查看 API 文档。
+当前 Docker 配置尚未接入 Vite 前端构建流程。本地前端开发请使用 `pnpm dev`，Docker
+适配将在后续变更中单独完成。
 
 ## 项目结构
 
@@ -84,7 +97,14 @@ cyber-foodie-debate/
 │   │   ├── models.py            # Pydantic 数据模型
 │   │   ├── config.py            # 配置管理
 │   │   └── app.py               # 应用工厂
-│   └── frontend/                # 前端静态文件
+│   └── frontend/                # React + TypeScript 独立前端应用
+│       ├── src/
+│       │   ├── components/ui/   # shadcn/ui 基础组件
+│       │   ├── features/debate/ # 辩论页面、状态与 API 逻辑
+│       │   ├── lib/sse.ts       # POST SSE 流解析器
+│       │   └── types/debate.ts  # 辩论领域类型
+│       ├── package.json
+│       └── vite.config.ts
 ├── tests/
 │   ├── unit/                    # 单元测试
 │   └── bdd/features/            # BDD 验收测试
@@ -103,8 +123,8 @@ cyber-foodie-debate/
 | 饮食偏好输入   | 口味/预算/天气/忌口     | ✅ MVP      |
 | 双Agent辩论    | 川辣派 vs 粤式养生派    | ✅ MVP      |
 | 辩论结果判定   | 自动判定获胜方+推荐菜品 | ✅ MVP      |
-| 流式响应       | SSE 实时辩论直播        | 🔄 Sprint 3 |
-| TTS语音播报    | 微软TTS朗读辩论内容/    | 🔄 Sprint 3 |
+| 流式响应       | POST SSE 实时辩论直播   | ✅ MVP      |
+| TTS语音播报    | 微软TTS朗读辩论结果     | ✅ MVP      |
 | 历史记录       | 辩论会话持久化          | 🔄 Sprint 3 |
 | GitHub API集成 | 自动获取commit生成梗图  | ❌ 规划中   |
 
@@ -118,17 +138,30 @@ cyber-foodie-debate/
 | ---- | ------------------------------- | -------- |
 | GET  | `/health`                     | 健康检查 |
 | POST | `/api/v1/debate/start`        | 启动辩论 |
+| POST | `/api/v1/debate/start-stream` | 流式启动三轮辩论 |
 | GET  | `/api/v1/debate/{session_id}` | 查询会话 |
+| POST | `/api/v1/tts/synthesize-debate-result` | 合成辩论结果语音 |
 
 ## 技术栈
 
 - **LLM**: 硅基流动 DeepSeek-V4-Flash
 - **后端**: Python 3.11 / FastAPI / Pydantic v2
-- **前端**: HTML5 / CSS3 / Vanilla JS
+- **前端**: React 19 / TypeScript / Vite
+- **UI**: Tailwind CSS v4 / shadcn/ui / Lucide React
 - **TTS**: Microsoft edge-tts
-- **测试**: pytest / behave (BDD)
+- **测试**: pytest / behave (BDD) / Vitest / Testing Library
 - **CI/CD**: GitHub Actions
 - **容器**: Docker / docker-compose
+
+## 前端质量检查
+
+在 `src/frontend` 目录执行：
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+```
 
 ## 团队与贡献
 
