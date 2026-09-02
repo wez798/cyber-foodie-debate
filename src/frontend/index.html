@@ -1,99 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI校园干饭辩论赛</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🍔 AI校园干饭辩论赛 🍜</h1>
-            <p class="subtitle">川辣派 vs 粤式养生派 - 今天吃什么？</p>
-        </header>
-
-        <main>
-            <section class="preference-panel">
-                <h2>📋 你的饮食偏好</h2>
-                <form id="preference-form">
-                    <div class="form-group">
-                        <label for="taste">口味偏好</label>
-                        <select id="taste" name="taste" required>
-                            <option value="辣">🌶️ 无辣不欢</option>
-                            <option value="清淡">🥬 清淡养生</option>
-                            <option value="酸甜">🍋 酸甜开胃</option>
-                            <option value="咸鲜">🧂 咸鲜适中</option>
-                            <option value="随便">🎲 随便都行</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="budget">预算范围</label>
-                        <select id="budget" name="budget" required>
-                            <option value="10元以下">💰 10元以下（穷学生）</option>
-                            <option value="10-20元">💰💰 10-20元（正常消费）</option>
-                            <option value="20-30元">💰💰💰 20-30元（改善伙食）</option>
-                            <option value="30元以上">💎 30元以上（奢侈一把）</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="weather">今天天气</label>
-                        <select id="weather" name="weather">
-                            <option value="晴天">☀️ 晴天</option>
-                            <option value="雨天">🌧️ 雨天</option>
-                            <option value="阴天">☁️ 阴天</option>
-                            <option value="很热">🔥 很热</option>
-                            <option value="很冷">❄️ 很冷</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="allergy">忌口/过敏</label>
-                        <input type="text" id="allergy" name="allergy" placeholder="如：不吃香菜、海鲜过敏">
-                    </div>
-
-                    <button type="submit" class="btn-debate" id="start-btn">
-                        🔥 开始辩论！
-                    </button>
-                </form>
-            </section>
-
-            <section class="debate-stage" id="debate-stage" style="display: none;">
-                <h2>⚔️ 辩论实况</h2>
-                <div class="debate-arena">
-                    <div class="agent-card agent-a">
-                        <div class="agent-header">
-                            <span class="agent-icon">🌶️</span>
-                            <span class="agent-name">川辣派·老麻</span>
-                        </div>
-                        <div class="agent-content" id="agent-a-content"></div>
-                    </div>
-
-                    <div class="vs-badge">VS</div>
-
-                    <div class="agent-card agent-b">
-                        <div class="agent-header">
-                            <span class="agent-icon">🍵</span>
-                            <span class="agent-name">粤式养生·阿靓</span>
-                        </div>
-                        <div class="agent-content" id="agent-b-content"></div>
-                    </div>
-                </div>
-
-                <div class="debate-result" id="debate-result" style="display: none;">
-                    <h3>🏆 辩论结果</h3>
-                    <div class="result-content" id="result-content"></div>
-                </div>
-            </section>
-        </main>
-
-        <footer>
-            <p>Cyber Foodie Debate | 基于敏捷方法的AI原生应用开发实践</p>
-        </footer>
-    </div>
-
-    <script src="app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="让两位 AI 大厨围绕口味、预算与天气展开三轮辩论，给出今天吃什么的明确答案。"
+    />
+    <title>Cyber Foodie Debate | AI 校园干饭辩论赛</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
