@@ -6,9 +6,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/components/ui/native-select"
+  PageModeSwitch,
+  type PageMode,
+} from "@/components/page-mode-switch"
 import { Toaster } from "@/components/ui/sonner"
 import { ChatPanel } from "@/features/chat/chat-panel"
 import { DebateArena } from "@/features/debate/components/debate-arena"
@@ -25,7 +25,7 @@ const phaseLabel = {
   error: "需重试",
 }
 
-type AppPage = "chat" | "debate"
+type AppPage = PageMode
 
 function pageFromPath(): AppPage {
   return window.location.pathname === "/debate" ? "debate" : "chat"
@@ -109,20 +109,10 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="app-page" className="sr-only">
-              功能页面
-            </label>
-            <NativeSelect
-              id="app-page"
+            <PageModeSwitch
               value={page}
-              onChange={(event) =>
-                handlePageChange(event.target.value as AppPage)
-              }
-              className="min-w-40 bg-background"
-            >
-              <NativeSelectOption value="chat">自由聊</NativeSelectOption>
-              <NativeSelectOption value="debate">辩论赛</NativeSelectOption>
-            </NativeSelect>
+              onChange={handlePageChange}
+            />
             {page === "debate" && (
               <>
                 <Badge variant="outline" className="bg-background">
@@ -148,47 +138,55 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-[1480px] space-y-8 px-4 py-6 sm:px-6 lg:px-8">
-        {page === "chat" ? (
-          <ChatPanel />
-        ) : (
-          <section className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
-            <aside className="lg:sticky lg:top-6">
-              <PreferenceForm
-                phase={state.phase}
-                onSubmit={handleSubmit}
-                onCancel={handleCancel}
-              />
-            </aside>
-
-            <div className="min-w-0">
-              {state.error && (
-                <Alert variant="destructive" className="mb-5">
-                  <AlertCircle aria-hidden="true" />
-                  <AlertTitle>赛场连接中断</AlertTitle>
-                  <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <span>{state.error}</span>
-                    <Button size="sm" variant="outline" onClick={handleRetry}>
-                      <RotateCcw aria-hidden="true" />
-                      重试
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <DebateArena state={state} />
-
-              {state.result && (
-                <ResultPanel
-                  result={state.result}
-                  audioUrl={audioUrl}
-                  isAudioLoading={isAudioLoading}
-                  onPlay={handlePlay}
-                  onReset={reset}
+        <div
+          key={page}
+          id={`page-panel-${page}`}
+          role="tabpanel"
+          aria-labelledby={`page-tab-${page}`}
+          className="page-content-enter"
+        >
+          {page === "chat" ? (
+            <ChatPanel />
+          ) : (
+            <section className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+              <aside className="lg:sticky lg:top-6">
+                <PreferenceForm
+                  phase={state.phase}
+                  onSubmit={handleSubmit}
+                  onCancel={handleCancel}
                 />
-              )}
-            </div>
-          </section>
-        )}
+              </aside>
+
+              <div className="min-w-0">
+                {state.error && (
+                  <Alert variant="destructive" className="mb-5">
+                    <AlertCircle aria-hidden="true" />
+                    <AlertTitle>赛场连接中断</AlertTitle>
+                    <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span>{state.error}</span>
+                      <Button size="sm" variant="outline" onClick={handleRetry}>
+                        <RotateCcw aria-hidden="true" />
+                        重试
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <DebateArena state={state} />
+
+                {state.result && (
+                  <ResultPanel
+                    result={state.result}
+                    audioUrl={audioUrl}
+                    isAudioLoading={isAudioLoading}
+                    onPlay={handlePlay}
+                    onReset={reset}
+                  />
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       </main>
 
       <footer className="border-t bg-[#fffdf8]">

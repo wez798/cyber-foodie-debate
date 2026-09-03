@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -76,12 +76,48 @@ describe("Cyber Foodie Debate app", () => {
 
     expect(screen.getByText("擂台主持人已就位")).toBeInTheDocument()
     expect(screen.queryByLabelText("口味偏好")).not.toBeInTheDocument()
+    const chatTab = screen.getByRole("tab", { name: "自由聊" })
+    const debateTab = screen.getByRole("tab", { name: "辩论赛" })
+    expect(screen.getAllByRole("tab")).toHaveLength(2)
+    expect(chatTab).toHaveAttribute("aria-selected", "true")
+    expect(debateTab).toHaveAttribute("aria-selected", "false")
 
-    await user.selectOptions(screen.getByLabelText("功能页面"), "debate")
+    await user.click(debateTab)
 
     expect(screen.getByLabelText("口味偏好")).toBeInTheDocument()
     expect(screen.queryByText("擂台主持人已就位")).not.toBeInTheDocument()
     expect(window.location.pathname).toBe("/debate")
+    expect(chatTab).toHaveAttribute("aria-selected", "false")
+    expect(debateTab).toHaveAttribute("aria-selected", "true")
+
+    const ripple = screen.getByTestId("page-mode-ripple")
+    fireEvent.animationEnd(ripple)
+    await waitFor(() =>
+      expect(screen.queryByTestId("page-mode-ripple")).not.toBeInTheDocument(),
+    )
+
+    await user.click(chatTab)
+    expect(window.location.pathname).toBe("/chat")
+    expect(screen.getByText("擂台主持人已就位")).toBeInTheDocument()
+  })
+
+  it("supports arrow-key page switching", async () => {
+    window.history.replaceState(null, "", "/chat")
+    render(<App />)
+    const user = userEvent.setup()
+    const chatTab = screen.getByRole("tab", { name: "自由聊" })
+    const debateTab = screen.getByRole("tab", { name: "辩论赛" })
+
+    chatTab.focus()
+    await user.keyboard("{ArrowRight}")
+    expect(debateTab).toHaveFocus()
+    expect(debateTab).toHaveAttribute("aria-selected", "true")
+    expect(window.location.pathname).toBe("/debate")
+
+    await user.keyboard("{ArrowLeft}")
+    expect(chatTab).toHaveFocus()
+    expect(chatTab).toHaveAttribute("aria-selected", "true")
+    expect(window.location.pathname).toBe("/chat")
   })
 
   it("shows required validation before starting", async () => {
