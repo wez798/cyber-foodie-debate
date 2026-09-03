@@ -64,7 +64,24 @@ async function fillRequiredFields() {
 
 describe("Cyber Foodie Debate app", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/debate")
+    window.localStorage.clear()
     streamDebateMock.mockReset()
+  })
+
+  it("switches between separate chat and debate pages", async () => {
+    window.history.replaceState(null, "", "/chat")
+    render(<App />)
+    const user = userEvent.setup()
+
+    expect(screen.getByText("擂台主持人已就位")).toBeInTheDocument()
+    expect(screen.queryByLabelText("口味偏好")).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText("功能页面"), "debate")
+
+    expect(screen.getByLabelText("口味偏好")).toBeInTheDocument()
+    expect(screen.queryByText("擂台主持人已就位")).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe("/debate")
   })
 
   it("shows required validation before starting", async () => {

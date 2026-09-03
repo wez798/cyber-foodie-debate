@@ -1,10 +1,16 @@
 import { AlertCircle, ChefHat, RotateCcw, ShieldCheck } from "lucide-react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select"
 import { Toaster } from "@/components/ui/sonner"
+import { ChatPanel } from "@/features/chat/chat-panel"
 import { DebateArena } from "@/features/debate/components/debate-arena"
 import { PreferenceForm } from "@/features/debate/components/preference-form"
 import { ResultPanel } from "@/features/debate/components/result-panel"
@@ -19,7 +25,14 @@ const phaseLabel = {
   error: "需重试",
 }
 
+type AppPage = "chat" | "debate"
+
+function pageFromPath(): AppPage {
+  return window.location.pathname === "/debate" ? "debate" : "chat"
+}
+
 export default function App() {
+  const [page, setPage] = useState<AppPage>(pageFromPath)
   const {
     state,
     audioUrl,
@@ -30,6 +43,28 @@ export default function App() {
     reset,
     playResult,
   } = useDebate()
+
+  useEffect(() => {
+    if (!["/chat", "/debate"].includes(window.location.pathname)) {
+      window.history.replaceState(null, "", "/chat")
+    }
+    const handlePopState = () => setPage(pageFromPath())
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  useEffect(() => {
+    document.title =
+      page === "chat"
+        ? "自由聊 | Cyber Foodie Debate"
+        : "AI 校园干饭辩论赛 | Cyber Foodie Debate"
+  }, [page])
+
+  const handlePageChange = (nextPage: AppPage) => {
+    if (nextPage === page) return
+    window.history.pushState(null, "", nextPage === "chat" ? "/chat" : "/debate")
+    setPage(nextPage)
+  }
 
   const handleSubmit = async (preference: FoodPreference) => {
     const completed = await start(preference)
@@ -63,67 +98,97 @@ export default function App() {
               <ChefHat className="size-6" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold sm:text-3xl">AI 校园干饭辩论赛</h1>
+              <h1 className="text-2xl font-bold sm:text-3xl">
+                Cyber Foodie Debate
+              </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                两位大厨，三轮交锋，一个明确答案。
+                {page === "chat"
+                  ? "校园干饭搭子，随时聊、随时推荐。"
+                  : "两位大厨，三轮交锋，一个明确答案。"}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="bg-background">
-              <ShieldCheck aria-hidden="true" />
-              固定 3 轮
-            </Badge>
-            <Badge
-              className={
-                state.phase === "streaming"
-                  ? "bg-[#277a68] text-white hover:bg-[#277a68]"
-                  : undefined
+            <label htmlFor="app-page" className="sr-only">
+              功能页面
+            </label>
+            <NativeSelect
+              id="app-page"
+              value={page}
+              onChange={(event) =>
+                handlePageChange(event.target.value as AppPage)
               }
-              variant={state.phase === "streaming" ? "default" : "secondary"}
+              className="min-w-40 bg-background"
             >
-              {phaseLabel[state.phase]}
-            </Badge>
+              <NativeSelectOption value="chat">自由聊</NativeSelectOption>
+              <NativeSelectOption value="debate">辩论赛</NativeSelectOption>
+            </NativeSelect>
+            {page === "debate" && (
+              <>
+                <Badge variant="outline" className="bg-background">
+                  <ShieldCheck aria-hidden="true" />
+                  固定 3 轮
+                </Badge>
+                <Badge
+                  className={
+                    state.phase === "streaming"
+                      ? "bg-[#277a68] text-white hover:bg-[#277a68]"
+                      : undefined
+                  }
+                  variant={
+                    state.phase === "streaming" ? "default" : "secondary"
+                  }
+                >
+                  {phaseLabel[state.phase]}
+                </Badge>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1480px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:px-8">
-        <aside className="lg:sticky lg:top-6">
-          <PreferenceForm
-            phase={state.phase}
-            onSubmit={handleSubmit}
-            onCancel={handleCancel}
-          />
-        </aside>
+      <main className="mx-auto max-w-[1480px] space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+        {page === "chat" ? (
+          <ChatPanel />
+        ) : (
+          <section className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+            <aside className="lg:sticky lg:top-6">
+              <PreferenceForm
+                phase={state.phase}
+                onSubmit={handleSubmit}
+                onCancel={handleCancel}
+              />
+            </aside>
 
-        <div className="min-w-0">
-          {state.error && (
-            <Alert variant="destructive" className="mb-5">
-              <AlertCircle aria-hidden="true" />
-              <AlertTitle>赛场连接中断</AlertTitle>
-              <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>{state.error}</span>
-                <Button size="sm" variant="outline" onClick={handleRetry}>
-                  <RotateCcw aria-hidden="true" />
-                  重试
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
+            <div className="min-w-0">
+              {state.error && (
+                <Alert variant="destructive" className="mb-5">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>赛场连接中断</AlertTitle>
+                  <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{state.error}</span>
+                    <Button size="sm" variant="outline" onClick={handleRetry}>
+                      <RotateCcw aria-hidden="true" />
+                      重试
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
 
-          <DebateArena state={state} />
+              <DebateArena state={state} />
 
-          {state.result && (
-            <ResultPanel
-              result={state.result}
-              audioUrl={audioUrl}
-              isAudioLoading={isAudioLoading}
-              onPlay={handlePlay}
-              onReset={reset}
-            />
-          )}
-        </div>
+              {state.result && (
+                <ResultPanel
+                  result={state.result}
+                  audioUrl={audioUrl}
+                  isAudioLoading={isAudioLoading}
+                  onPlay={handlePlay}
+                  onReset={reset}
+                />
+              )}
+            </div>
+          </section>
+        )}
       </main>
 
       <footer className="border-t bg-[#fffdf8]">

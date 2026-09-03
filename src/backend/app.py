@@ -3,9 +3,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.chat_router import router as chat_router
 from .api.debate_router import router as debate_router
 from .api.tts_router import router as tts_router
-from .config import settings
 
 
 def create_app() -> FastAPI:
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
 
     app.include_router(debate_router, prefix="/api/v1")
     app.include_router(tts_router, prefix="/api/v1")
+    app.include_router(chat_router, prefix="/api")
 
     @app.get("/")
     async def root():
