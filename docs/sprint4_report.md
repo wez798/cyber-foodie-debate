@@ -2,6 +2,10 @@
 
 > 周期：Day 9 - Day 10
 
+> 架构演进说明（2026-09）：前端已从 HTML/CSS/Vanilla JS 迁移到
+> React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui。本文保留 Sprint 4
+> 的迭代背景；下方技术栈和当前状态已按迁移后的代码基线修订。
+
 ## Sprint 目标
 配置 GitHub Actions 自动化测试，撰写 README，录制演示视频，现场答辩。
 
@@ -41,8 +45,8 @@
 | SSE 流式响应 | 100% | 实时辩论直播 |
 | TTS 语音播报 | 100% | 微软 edge-tts |
 | 响应式 UI | 100% | 移动端适配 |
-| Docker 容器化 | 100% | 一键部署 |
-| CI/CD | 100% | GitHub Actions |
+| Docker 容器化 | 已适配 | FastAPI 后端 + Vite 构建/Nginx 前端 |
+| CI/CD | 已完善 | 后端门禁、前端测试/类型/构建、Compose 构建 |
 
 ### 创新价值
 1. **趣味性强**: 双AI对抗辩论形式，天然具有演示效果
@@ -52,9 +56,9 @@
 
 ### 技术栈总览
 - 后端: Python 3.11 / FastAPI / Pydantic v2 / httpx / tenacity
-- 前端: HTML5 / CSS3 / Vanilla JS
+- 前端: React 19 / TypeScript / Vite / Tailwind CSS v4 / shadcn/ui
 - AI: 硅基流动 DeepSeek-V4-Flash / 微软 edge-tts
-- 工程: GitHub Actions / Docker / pytest / behave
+- 工程: GitHub Actions / Docker / pytest / behave / Vitest / Testing Library
 
 ## Sprint 回顾
 - **整体评价**: 项目在2周内完成了从0到1的完整交付

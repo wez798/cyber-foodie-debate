@@ -1,0 +1,284 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #1f2523;
+  background: #f4f5f1;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --radius: 0.5rem;
+  --background: oklch(0.975 0.008 115);
+  --foreground: oklch(0.245 0.018 145);
+  --card: oklch(0.995 0.003 115);
+  --card-foreground: oklch(0.245 0.018 145);
+  --popover: oklch(0.995 0.003 115);
+  --popover-foreground: oklch(0.245 0.018 145);
+  --primary: oklch(0.54 0.16 36);
+  --primary-foreground: oklch(0.985 0.005 90);
+  --secondary: oklch(0.92 0.025 155);
+  --secondary-foreground: oklch(0.29 0.055 158);
+  --muted: oklch(0.935 0.01 110);
+  --muted-foreground: oklch(0.5 0.02 140);
+  --accent: oklch(0.91 0.04 84);
+  --accent-foreground: oklch(0.31 0.05 62);
+  --destructive: oklch(0.58 0.2 25);
+  --border: oklch(0.865 0.015 125);
+  --input: oklch(0.865 0.015 125);
+  --ring: oklch(0.54 0.16 36);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--background);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  color: #ffffff;
+  background: #c84c24;
+}
+
+.page-mode-switch {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: min(17rem, 100%);
+  min-width: 16rem;
+  min-height: 3.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0.25rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, white);
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--background) 92%, white),
+      color-mix(in oklab, var(--muted) 70%, white)
+    );
+  box-shadow:
+    inset 0 1px 2px rgb(31 37 35 / 7%),
+    0 5px 18px rgb(50 53 43 / 7%);
+}
+
+.page-mode-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  left: 0.25rem;
+  width: calc(50% - 0.25rem);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #d65d2f, #b74422);
+  box-shadow:
+    0 5px 14px rgb(183 68 34 / 24%),
+    inset 0 1px 0 rgb(255 255 255 / 25%);
+  transform: translateX(0);
+  transform-origin: center;
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 240ms ease-out,
+    box-shadow 240ms ease-out;
+}
+
+.page-mode-indicator[data-page="debate"] {
+  background: linear-gradient(135deg, #bf4b2c 0%, #7d5a3a 48%, #277a68 100%);
+  box-shadow:
+    0 5px 15px rgb(39 122 104 / 22%),
+    inset 0 1px 0 rgb(255 255 255 / 25%);
+  transform: translateX(100%);
+}
+
+.page-mode-tab {
+  --glow-x: 50%;
+  --glow-y: 50%;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transform: translateY(0) scale(1);
+  transition:
+    color 180ms ease-out,
+    transform 190ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.page-mode-tab::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle 3.75rem at var(--glow-x) var(--glow-y),
+    rgb(210 92 47 / 16%),
+    transparent 72%
+  );
+  content: "";
+  opacity: 0;
+  transition: opacity 190ms ease-out;
+}
+
+.page-mode-tab[data-selected="true"] {
+  color: #fffdf8;
+  text-shadow: 0 1px 1px rgb(31 37 35 / 18%);
+}
+
+.page-mode-tab:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.page-mode-tab:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--ring) 42%, transparent);
+  outline-offset: -3px;
+}
+
+.page-mode-label {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.page-mode-ripple {
+  position: absolute;
+  z-index: 1;
+  top: var(--ripple-y);
+  left: var(--ripple-x);
+  width: var(--ripple-size);
+  height: var(--ripple-size);
+  border: 1px solid rgb(255 255 255 / 36%);
+  border-radius: 999px;
+  pointer-events: none;
+  background: rgb(255 255 255 / 25%);
+  transform: translate(-50%, -50%) scale(0);
+  animation: page-mode-ripple 410ms cubic-bezier(0.22, 1, 0.36, 1)
+    forwards;
+}
+
+.page-content-enter {
+  animation: page-content-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes page-mode-ripple {
+  0% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes page-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: hover) {
+  .page-mode-tab:hover {
+    color: var(--foreground);
+    transform: translateY(-1px) scale(1.015);
+  }
+
+  .page-mode-tab[data-selected="true"]:hover {
+    color: #fffdf8;
+  }
+
+  .page-mode-tab:hover::before {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-mode-indicator,
+  .page-mode-tab,
+  .page-mode-tab::before {
+    transition: none;
+  }
+
+  .page-mode-tab:hover,
+  .page-mode-tab:active {
+    transform: none;
+  }
+
+  .page-mode-ripple {
+    display: none;
+    animation: none;
+  }
+
+  .page-content-enter {
+    animation: none;
+  }
+}

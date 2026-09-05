@@ -11,29 +11,37 @@
 ```mermaid
 graph TB
     subgraph 前端层
-        A[用户浏览器] --> B[HTML/CSS/JS]
+        A[用户浏览器] --> B[React + TypeScript]
+        B --> C[Vite + Tailwind CSS v4 + shadcn/ui]
+        B --> K[localStorage 最近对话]
     end
 
     subgraph 后端服务层
-        B --> C[FastAPI API]
-        C --> D[辩论编排服务 DebateService]
-        D --> E[LLM 调用服务]
-        D --> F[TTS 语音服务]
+        C --> D[FastAPI API]
+        D --> L[通用对话服务 ChatService]
+        D --> E[辩论编排服务 DebateService]
+        L --> F[LLM 调用服务]
+        E --> F[LLM 调用服务]
+        E --> G[TTS 语音服务]
     end
 
     subgraph 外部服务
-        E --> G[硅基流动 DeepSeek-V4-Flash]
-        F --> H[微软 edge-tts]
+        F --> H[硅基流动 deepseek-ai/DeepSeek-V4-Flash]
+        G --> I[微软 edge-tts]
     end
 
     subgraph 数据层
-        D --> I[JSON 会话存储]
+        E --> J[内存辩论会话]
     end
 ```
 
 ## 快速启动
 
 ### 1. 环境准备
+
+- Python 3.11
+- Node.js 22.13+（或 24+）
+- pnpm
 
 ```bash
 # 克隆仓库
@@ -45,6 +53,16 @@ cp .env.example .env
 # 编辑 .env 填入硅基流动 API Key
 ```
 
+对话功能所需的配置如下，API Key 只保存在本地 `.env`，不要提交到仓库：
+
+```dotenv
+SILICONFLOW_API_KEY=your_siliconflow_api_key_here
+SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
+SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V4-Flash
+SILICONFLOW_MAX_REQUESTS_PER_MINUTE=60
+SILICONFLOW_MAX_CONCURRENCY=4
+```
+
 ### 2. 本地开发启动
 
 ```bash
@@ -53,17 +71,34 @@ pip install -r src/backend/requirements.txt
 
 # 启动后端服务
 python -m src.backend.main
-
-# 前端直接打开 src/frontend/index.html 或使用任意静态服务器
 ```
 
-### 3. Docker 一键启动
+另开终端启动前端：
 
 ```bash
-docker-compose up --build
+cd src/frontend
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-访问 http://localhost:3000 使用前端，http://localhost:8000/docs 查看 API 文档。
+前端辩论接口默认访问 `http://localhost:8000/api/v1`，聊天接口默认访问
+`http://localhost:8000/api`。如后端地址不同，可分别设置
+`VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL`。建议在
+`src/frontend/.env.local` 中保存本地前端配置；任何 `VITE_*` 变量都会进入浏览器包，
+不得放入 API Key 或其他敏感信息。
+
+访问 http://localhost:5173 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
+
+### 3. Docker Compose 一键启动
+
+```bash
+docker compose up --build
+```
+
+访问 http://localhost:3000 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
+前端镜像通过 pnpm 构建 Vite 产物，并由 Nginx 托管；`/chat`、`/debate` 支持直接访问
+和刷新，`/api/` 由 Nginx 反向代理到 FastAPI。后端容器的存活检查只访问轻量根接口，
+不会周期性调用 LLM 或 TTS。
 
 ## 项目结构
 
@@ -84,13 +119,23 @@ cyber-foodie-debate/
 │   │   ├── models.py            # Pydantic 数据模型
 │   │   ├── config.py            # 配置管理
 │   │   └── app.py               # 应用工厂
-│   └── frontend/                # 前端静态文件
+│   └── frontend/                # React + TypeScript 独立前端应用
+│       ├── src/
+│       │   ├── components/ui/   # shadcn/ui 基础组件
+│       │   ├── features/chat/   # 自由聊页面、状态、本地存储与 API
+│       │   ├── features/debate/ # 辩论页面、状态与 API 逻辑
+│       │   ├── lib/sse.ts       # POST SSE 流解析器
+│       │   └── types/           # 聊天与辩论领域类型
+│       ├── Dockerfile            # Vite 构建 + Nginx 运行镜像
+│       ├── nginx.conf            # SPA 回退与 /api/ 反向代理
+│       ├── package.json
+│       └── vite.config.ts
 ├── tests/
 │   ├── unit/                    # 单元测试
 │   └── bdd/features/            # BDD 验收测试
 ├── eval/                        # 评测数据集
 ├── .env.example                 # 环境变量模板
-├── Dockerfile                   # 容器化封装
+├── Dockerfile                   # FastAPI 后端镜像
 ├── docker-compose.yml           # 编排启动
 ├── AGENTS.md                    # AI 规则注入
 └── README.md                    # 本文件
@@ -103,9 +148,12 @@ cyber-foodie-debate/
 | 饮食偏好输入   | 口味/预算/天气/忌口     | ✅ MVP      |
 | 双Agent辩论    | 川辣派 vs 粤式养生派    | ✅ MVP      |
 | 辩论结果判定   | 自动判定获胜方+推荐菜品 | ✅ MVP      |
-| 流式响应       | SSE 实时辩论直播        | 🔄 Sprint 3 |
-| TTS语音播报    | 微软TTS朗读辩论内容/    | 🔄 Sprint 3 |
-| 历史记录       | 辩论会话持久化          | 🔄 Sprint 3 |
+| 流式响应       | POST SSE 实时辩论直播   | ✅ MVP      |
+| 双页面交互     | 自由聊与辩论赛独立切换  | ✅ MVP      |
+| 自由聊推荐     | 推荐能力内置且 Prompt 模式不可见 | ✅ MVP |
+| 对话历史       | 浏览器 localStorage 最近会话 | ✅ MVP  |
+| TTS语音播报    | 微软TTS朗读辩论结果     | ✅ MVP      |
+| 后端对话持久化 | conversation_id 已预留  | 🔄 后续     |
 | GitHub API集成 | 自动获取commit生成梗图  | ❌ 规划中   |
 
 ## API 文档
@@ -116,19 +164,74 @@ cyber-foodie-debate/
 
 | 方法 | 路径                            | 描述     |
 | ---- | ------------------------------- | -------- |
-| GET  | `/health`                     | 健康检查 |
+| GET  | `/api/v1/health`              | 健康检查 |
+| POST | `/api/chat`                   | 非流式对话兜底 |
+| POST | `/api/chat/stream`            | POST SSE 流式对话 |
 | POST | `/api/v1/debate/start`        | 启动辩论 |
+| POST | `/api/v1/debate/start-stream` | 流式启动三轮辩论 |
 | GET  | `/api/v1/debate/{session_id}` | 查询会话 |
+| POST | `/api/v1/tts/synthesize-debate-result` | 合成辩论结果语音 |
+
+### 对话请求
+
+`POST /api/chat` 与 `POST /api/chat/stream` 使用相同请求体。最后一条消息必须是
+`user`，客户端不能提交 `system` 角色：
+
+```json
+{
+  "conversation_id": null,
+  "messages": [
+    {"role": "user", "content": "预算 20 元，午饭吃什么？"}
+  ],
+  "mode": "recommend",
+  "topic": "校园午饭",
+  "metadata": {"client": "web"}
+}
+```
+
+`mode` 可取 `chat`、`debate_pro`、`debate_con`、`judge`、`recommend`。
+这些模式属于后端扩展能力；当前前端自由聊固定使用 `chat`，推荐能力已合并其中，
+正反方和主持裁决则由独立的辩论页面负责，不向用户展示 Prompt 模式切换。
+流式接口依次发送 `start`、多个 `delta`、`done` SSE 事件；若响应头已发出后
+上游失败，则发送 `error` 事件。当前聊天响应中的 `tts.status` 固定为
+`not_requested`，仅作为下一步接入 edge-tts 的扩展点。
+
+辩论流依次发送 `session_start`、多个 `round`、`result`；只有有效裁决才会发送
+`result`。上游失败或整体超时时发送结构化 `error`，客户端不得把它显示为完成。
+后端通过环境变量限制 SiliconFlow 每分钟请求数与进程内并发数。
+
+前端通过顶部“功能页面”选择器在 `/chat` 与 `/debate` 之间切换。AI 回复会经过
+安全的 Markdown 组件渲染，不会直接显示加粗、列表等 Markdown 源标记。
+
+聊天历史只保存在浏览器 localStorage，键为
+`cyber-foodie-debate:recent-chat`，内容包含 `conversation_id`、`messages`、
+`mode`、`topic` 和 `updated_at`；后端当前不保存聊天内容。
 
 ## 技术栈
 
-- **LLM**: 硅基流动 DeepSeek-V4-Flash
+- **LLM**: 硅基流动 `deepseek-ai/DeepSeek-V4-Flash`
 - **后端**: Python 3.11 / FastAPI / Pydantic v2
-- **前端**: HTML5 / CSS3 / Vanilla JS
+- **前端**: React 19 / TypeScript / Vite
+- **UI**: Tailwind CSS v4 / shadcn/ui / Lucide React
 - **TTS**: Microsoft edge-tts
-- **测试**: pytest / behave (BDD)
+- **测试**: pytest / behave (BDD) / Vitest / Testing Library
 - **CI/CD**: GitHub Actions
-- **容器**: Docker / docker-compose
+- **容器**: Docker / Docker Compose
+
+更完整的前后端分层、数据流、状态机和 SSE 时序见
+[`docs/system_design.md`](docs/system_design.md)。
+
+## 前端质量检查
+
+在 `src/frontend` 目录执行：
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+后端质量检查与完整贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 团队与贡献
 

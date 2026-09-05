@@ -10,6 +10,7 @@ router = APIRouter()
 
 class TTSRequest(BaseModel):
     """TTS 合成请求。"""
+
     text: str = Field(..., description="待合成文本", min_length=1, max_length=2000)
     voice: str | None = Field(None, description="语音角色，默认使用配置值")
     rate: str | None = Field(None, description="语速，如 +10%")
@@ -18,6 +19,7 @@ class TTSRequest(BaseModel):
 
 class TTSResponse(BaseModel):
     """TTS 合成响应。"""
+
     status: str
     audio_format: str = "mp3"
     message: str
@@ -52,7 +54,9 @@ async def synthesize_debate_result(session_id: str):
         raise HTTPException(status_code=404, detail="会话不存在或辩论未完成")
 
     result = session.result
-    winner_name = "川辣派老麻" if result.winner.value == "sichuan_spicy" else "粤式养生派阿靓"
+    winner_name = (
+        "川辣派老麻" if result.winner.value == "sichuan_spicy" else "粤式养生派阿靓"
+    )
     tts_text = (
         f"辩论结束！获胜方是{winner_name}。"
         f"推荐菜品：{result.dish_name}。"

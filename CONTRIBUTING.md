@@ -4,25 +4,52 @@
 
 ## 开发环境搭建
 
+本项目需要 Python 3.11、Node.js 22.13+（或 24+）和 pnpm。
+
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/<your-org>/cyber-foodie-debate.git
+git clone https://github.com/wez798/cyber-foodie-debate.git
 cd cyber-foodie-debate
 
 # 2. 创建开发分支
 git checkout -b feature/your-feature-name
 
-# 3. 安装依赖
+# 3. 安装后端依赖
 pip install -r requirements.txt
 
 # 4. 配置环境变量
 cp .env.example .env
 # 编辑 .env 填入硅基流动 API Key
 
-# 5. 运行测试
-pytest tests/ -v
-behave tests/bdd/
+# 5. 安装前端依赖
+cd src/frontend
+pnpm install --frozen-lockfile
 ```
+
+本地开发时，在仓库根目录启动后端：
+
+```bash
+python -m src.backend.main
+```
+
+另开终端启动 Vite 前端：
+
+```bash
+cd src/frontend
+pnpm dev
+```
+
+默认访问 `http://localhost:5173`。后端地址不是 `http://localhost:8000` 时，
+请在 `src/frontend/.env.local` 中配置 `VITE_API_BASE_URL` 和
+`VITE_CHAT_API_BASE_URL`，不要把密钥写入任何 `VITE_*` 变量。
+
+也可以在仓库根目录启动完整容器环境：
+
+```bash
+docker compose up --build
+```
+
+容器前端位于 `http://localhost:3000`，并通过 Nginx 的 `/api/` 代理访问后端。
 
 ## 分支模型
 
@@ -82,18 +109,45 @@ docs: 更新Sprint 2报告
 - 所有 API 接口使用 Pydantic Schema 强校验
 - 敏感信息（API Key）严禁硬编码，必须从 `.env` 读取
 - 外部 API 调用使用 `tenacity` 指数退避重试
+- TypeScript 保持 strict 模式，业务模块放在 `src/frontend/src/features/`
+- 优先复用 `src/frontend/src/components/ui/` 中的 shadcn/ui 组件
+- 浏览器端 API 契约变更必须同步更新 TypeScript 类型与测试
 
 ## 测试要求
 
-- 新增功能必须包含单元测试（pytest）
+- 后端新增功能必须包含单元测试（pytest）
+- 前端新增功能必须包含 Vitest/Testing Library 测试
 - 核心用户故事必须包含 BDD 验收测试（behave/Gherkin）
-- 提交 PR 前确保所有测试通过：`pytest tests/ -v && behave tests/bdd/`
+- 流式交互至少覆盖正常完成、错误事件、取消和响应提前结束
+
+提交 PR 前分别执行：
+
+```bash
+# 仓库根目录
+ruff check src tests scripts
+ruff format --check src tests scripts
+mypy src --ignore-missing-imports
+pytest tests/unit -v
+behave tests/bdd
+
+# src/frontend
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+BDD 和连通性测试必须隔离或显式标记真实外部服务调用，默认测试不得消耗真实 API 配额。
+需要验证真实外部服务时，单独执行 `python scripts/test_api_connectivity.py`；任一服务
+连通失败时脚本会返回非零退出码。
 
 ## 代码审查清单
 
 提交 PR 前请确认：
 - [ ] 代码遵循 Angular Commit 规范
 - [ ] 无硬编码密钥/敏感信息
-- [ ] 已通过本地 `ruff check` 与 `pytest`
+- [ ] 后端 lint、类型检查、单元测试和 BDD 均通过
+- [ ] 前端测试、类型检查和生产构建均通过
+- [ ] 前后端 API 类型、SSE 事件和错误处理保持一致
+- [ ] 若修改前端路由或构建方式，已同步验证生产静态部署
 - [ ] 已更新相关文档（README/docs）
 - [ ] 至少一名组员已 Code Review

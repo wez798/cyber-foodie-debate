@@ -8,6 +8,7 @@ from ..config import settings
 
 class TTSServiceError(Exception):
     """TTS服务异常。"""
+
     pass
 
 

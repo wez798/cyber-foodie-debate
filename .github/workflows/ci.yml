@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   lint:
@@ -21,16 +21,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pytest
+          pip install -r requirements.txt
 
       - name: Ruff linting
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/
 
       - name: Ruff formatting check
-        run: ruff format --check src/ tests/
+        run: ruff format --check src/ tests/ scripts/
 
       - name: Type checking
-        run: mypy src/ --ignore-missing-imports || true
+        run: mypy src/ --ignore-missing-imports
 
   test:
     name: Unit & BDD Tests
@@ -48,26 +48,59 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov behave
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --cov=src --cov-report=xml
+        run: python -m pytest tests/unit/ -v --cov=src --cov-report=xml
 
       - name: Run BDD tests
-        run: behave tests/bdd/ --format pretty || true
+        run: behave tests/bdd/ --format pretty
 
       - name: Upload coverage
+        if: always()
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
           flags: unittests
+          fail_ci_if_error: false
+
+  frontend:
+    name: Frontend Quality Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm with Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: corepack pnpm test
+
+      - name: Type check frontend
+        run: corepack pnpm typecheck
+
+      - name: Build frontend
+        run: corepack pnpm build
 
   docker-build:
     name: Docker Build Check
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, frontend]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build -t cyber-foodie-debate .
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build Docker images
+        run: docker compose build
