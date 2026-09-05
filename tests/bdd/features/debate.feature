@@ -20,12 +20,15 @@ Feature: 美食辩论赛核心流程
     And 结果应包含0到1之间的置信度
 
   Scenario: 用户设置忌口信息
-    Given 用户设置了忌口为 "海鲜过敏"
+    Given 用户设置了口味偏好为 "清淡"
+    And 用户设置了预算为 "10-20元"
+    And 用户设置了忌口为 "海鲜过敏"
     When 辩论开始
     Then 两位大厨的推荐应避开海鲜类菜品
 
   Scenario Outline: 不同预算范围推荐不同价位菜品
-    Given 用户设置了预算为 "<budget>"
+    Given 用户设置了口味偏好为 "随便"
+    And 用户设置了预算为 "<budget>"
     When 辩论结束
     Then 推荐菜品价格应在 "<budget>" 范围内
 

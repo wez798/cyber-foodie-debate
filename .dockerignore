@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.uv-cache
+.pytest_cache
+.pnpm-store
+**/__pycache__
+**/*.pyc
+src/frontend/node_modules
+src/frontend/dist
+.env
+data
+/*.pdf
+/*.png

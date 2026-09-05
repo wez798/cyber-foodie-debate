@@ -14,6 +14,10 @@ const CHAT_MODES: ChatMode[] = [
   "recommend",
 ]
 
+function isChatMode(value: unknown): value is ChatMode {
+  return typeof value === "string" && CHAT_MODES.some((mode) => mode === value)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -37,13 +41,19 @@ export function loadRecentConversation(): ChatConversation | null {
       typeof parsed.conversation_id !== "string" ||
       !Array.isArray(parsed.messages) ||
       !parsed.messages.every(isMessage) ||
-      !CHAT_MODES.includes(parsed.mode as ChatMode) ||
+      !isChatMode(parsed.mode) ||
       typeof parsed.topic !== "string" ||
       typeof parsed.updated_at !== "string"
     ) {
       return null
     }
-    return parsed as unknown as ChatConversation
+    return {
+      conversation_id: parsed.conversation_id,
+      messages: parsed.messages,
+      mode: parsed.mode,
+      topic: parsed.topic,
+      updated_at: parsed.updated_at,
+    }
   } catch {
     return null
   }

@@ -114,12 +114,14 @@ export function useChat() {
       return true
     } catch (error) {
       if (controller.signal.aborted) {
-        setState((current) => ({
-          ...current,
-          messages: outgoingMessages,
-          phase: "idle",
-          error: null,
-        }))
+        if (controllerRef.current === controller) {
+          setState((current) => ({
+            ...current,
+            messages: outgoingMessages,
+            phase: "idle",
+            error: null,
+          }))
+        }
         return false
       }
       setState((current) => ({

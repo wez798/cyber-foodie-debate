@@ -39,6 +39,15 @@ function reducer(state: DebateViewState, action: Action): DebateViewState {
   }
   if (action.type === "reset") return initialState
 
+  if (action.event.event === "error") {
+    return {
+      ...state,
+      phase: "error",
+      sessionId: action.event.data.session_id,
+      activePersona: null,
+      error: action.event.data.error.message,
+    }
+  }
   if (action.event.event === "session_start") {
     return { ...state, sessionId: action.event.data.session_id }
   }
@@ -144,13 +153,18 @@ export function useDebate() {
 
     try {
       const blob = await synthesizeDebateResult(state.sessionId, controller.signal)
+      if (controller.signal.aborted || audioController.current !== controller) {
+        throw new DOMException("请求已取消", "AbortError")
+      }
       const nextUrl = URL.createObjectURL(blob)
       audioUrlRef.current = nextUrl
       setAudioUrl(nextUrl)
       return nextUrl
     } finally {
-      if (audioController.current === controller) audioController.current = null
-      setIsAudioLoading(false)
+      if (audioController.current === controller) {
+        audioController.current = null
+        setIsAudioLoading(false)
+      }
     }
   }, [clearAudio, state.sessionId])
 

@@ -16,8 +16,6 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /app/src ./src
 
-COPY .env.example .env
-
 EXPOSE 8000
 
 CMD ["python", "-m", "src.backend.main"]

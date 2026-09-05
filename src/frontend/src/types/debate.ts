@@ -49,15 +49,26 @@ export interface RoundData {
 
 export interface ResultData {
   session_id: string
-  status: "completed" | "timeout"
+  status: "completed"
   rounds: DebateRound[]
   result: DebateResult
+}
+
+export interface DebateStreamErrorData {
+  session_id: string
+  status: "failed" | "timeout"
+  error: {
+    code: string
+    message: string
+    retryable: boolean
+  }
 }
 
 export type DebateStreamEvent =
   | { event: "session_start"; data: SessionStartData }
   | { event: "round"; data: RoundData }
   | { event: "result"; data: ResultData }
+  | { event: "error"; data: DebateStreamErrorData }
 
 export interface DebateViewState {
   phase: DebatePhase

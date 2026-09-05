@@ -1,6 +1,10 @@
 """Async SiliconFlow OpenAI-compatible Chat Completions client."""
 
+import asyncio
+from collections import deque
 from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from time import monotonic
 from typing import Any, Literal
 
 import httpx
@@ -27,6 +31,29 @@ class LLMServiceError(Exception):
         self.message = message
         self.status_code = status_code
         self.retryable = retryable
+
+
+class _LocalRateLimiter:
+    """Process-local sliding-window guard for outbound provider calls."""
+
+    def __init__(self, max_requests_per_minute: int) -> None:
+        self.max_requests_per_minute = max_requests_per_minute
+        self._timestamps: deque[float] = deque()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = monotonic()
+            cutoff = now - 60.0
+            while self._timestamps and self._timestamps[0] <= cutoff:
+                self._timestamps.popleft()
+            if len(self._timestamps) >= self.max_requests_per_minute:
+                raise LLMServiceError(
+                    "local_rate_limited",
+                    "服务请求过于频繁，请稍后重试",
+                    status_code=429,
+                )
+            self._timestamps.append(now)
 
 
 class LLMCompletion(BaseModel):
@@ -97,6 +124,8 @@ class LLMService:
         model: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         retry_wait: wait_base | None = None,
+        max_requests_per_minute: int | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.api_key = (
             settings.siliconflow_api_key if api_key is None else api_key
@@ -112,6 +141,20 @@ class LLMService:
             min=2,
             max=10,
         )
+        request_limit = (
+            settings.siliconflow_max_requests_per_minute
+            if max_requests_per_minute is None
+            else max_requests_per_minute
+        )
+        concurrency_limit = (
+            settings.siliconflow_max_concurrency
+            if max_concurrency is None
+            else max_concurrency
+        )
+        if request_limit <= 0 or concurrency_limit <= 0:
+            raise ValueError("LLM 频率和并发限制必须大于 0")
+        self._rate_limiter = _LocalRateLimiter(request_limit)
+        self._concurrency_limiter = asyncio.Semaphore(concurrency_limit)
 
     def ensure_configured(self) -> None:
         """Fail before sending response headers when the API key is absent."""
@@ -131,7 +174,8 @@ class LLMService:
     ) -> LLMCompletion:
         """Request and validate a non-streaming chat completion."""
         payload = self._payload(messages, temperature, max_tokens, stream=False)
-        raw = await self._with_retry(self._post_json_once, payload)
+        async with self._request_slot():
+            raw = await self._with_retry(self._post_json_once, payload)
         try:
             parsed = _UpstreamCompletion.model_validate(raw)
         except ValidationError as exc:
@@ -154,34 +198,35 @@ class LLMService:
     ) -> AsyncIterator[LLMStreamChunk]:
         """Yield validated text deltas from a real upstream HTTP stream."""
         payload = self._payload(messages, temperature, max_tokens, stream=True)
-        client, response = await self._with_retry(self._open_stream_once, payload)
-        try:
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].lstrip()
-                if data == "[DONE]":
-                    break
-                if not data:
-                    continue
-                try:
-                    parsed = _UpstreamStreamChunk.model_validate_json(data)
-                except (ValidationError, ValueError) as exc:
-                    raise self._invalid_response_error() from exc
-                if not parsed.choices:
-                    continue
-                choice = parsed.choices[0]
-                yield LLMStreamChunk(
-                    delta=choice.delta.content or "",
-                    finish_reason=choice.finish_reason,
-                )
-        except httpx.TimeoutException as exc:
-            raise self._timeout_error() from exc
-        except httpx.TransportError as exc:
-            raise self._network_error() from exc
-        finally:
-            await response.aclose()
-            await client.aclose()
+        async with self._request_slot():
+            client, response = await self._with_retry(self._open_stream_once, payload)
+            try:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].lstrip()
+                    if data == "[DONE]":
+                        break
+                    if not data:
+                        continue
+                    try:
+                        parsed = _UpstreamStreamChunk.model_validate_json(data)
+                    except (ValidationError, ValueError) as exc:
+                        raise self._invalid_response_error() from exc
+                    if not parsed.choices:
+                        continue
+                    choice = parsed.choices[0]
+                    yield LLMStreamChunk(
+                        delta=choice.delta.content or "",
+                        finish_reason=choice.finish_reason,
+                    )
+            except httpx.TimeoutException as exc:
+                raise self._timeout_error() from exc
+            except httpx.TransportError as exc:
+                raise self._network_error() from exc
+            finally:
+                await response.aclose()
+                await client.aclose()
 
     async def chat_completion(
         self,
@@ -228,9 +273,12 @@ class LLMService:
     ) -> dict[str, Any]:
         self.ensure_configured()
         try:
+            validated_messages = [
+                _UpstreamRequestMessage.model_validate(message) for message in messages
+            ]
             request = _UpstreamChatRequest(
                 model=self.model,
-                messages=list(messages),
+                messages=validated_messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
@@ -242,6 +290,22 @@ class LLMService:
                 status_code=500,
             ) from exc
         return request.model_dump()
+
+    @asynccontextmanager
+    async def _request_slot(self) -> AsyncIterator[None]:
+        try:
+            await asyncio.wait_for(self._concurrency_limiter.acquire(), timeout=2.0)
+        except TimeoutError as exc:
+            raise LLMServiceError(
+                "server_busy",
+                "服务当前请求较多，请稍后重试",
+                status_code=429,
+                retryable=True,
+            ) from exc
+        try:
+            yield
+        finally:
+            self._concurrency_limiter.release()
 
     async def _with_retry(self, operation: Any, payload: dict[str, Any]) -> Any:
         async for attempt in AsyncRetrying(
@@ -255,6 +319,7 @@ class LLMService:
         raise AssertionError("tenacity retry loop exited unexpectedly")
 
     async def _post_json_once(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await self._rate_limiter.acquire()
         try:
             async with self._client() as client:
                 response = await client.post(
@@ -280,6 +345,7 @@ class LLMService:
     async def _open_stream_once(
         self, payload: dict[str, Any]
     ) -> tuple[httpx.AsyncClient, httpx.Response]:
+        await self._rate_limiter.acquire()
         client = self._client()
         try:
             request = client.build_request(

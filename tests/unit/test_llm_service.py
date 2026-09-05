@@ -171,3 +171,44 @@ def test_transport_errors_are_retried_and_normalized(
     assert attempts == 3
     assert captured.value.code == code
     assert captured.value.status_code == public_status
+
+
+def test_local_rate_limit_rejects_excess_calls_without_hitting_upstream() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "可以试试番茄鸡蛋面"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    service = LLMService(
+        api_key="test-key",
+        base_url="https://mock.siliconflow.local/v1",
+        transport=httpx.MockTransport(handler),
+        retry_wait=wait_none(),
+        max_requests_per_minute=1,
+    )
+
+    async def call_twice() -> LLMServiceError:
+        await service.complete([{"role": "user", "content": "第一次"}])
+        try:
+            await service.complete([{"role": "user", "content": "第二次"}])
+        except LLMServiceError as error:
+            return error
+        raise AssertionError("second request should have been rate limited")
+
+    error = asyncio.run(call_twice())
+
+    assert error.code == "local_rate_limited"
+    assert error.status_code == 429
+    assert attempts == 1

@@ -39,6 +39,10 @@ graph TB
 
 ### 1. 环境准备
 
+- Python 3.11
+- Node.js 22.13+（或 24+）
+- pnpm
+
 ```bash
 # 克隆仓库
 git clone https://github.com/wez798/cyber-foodie-debate.git
@@ -55,6 +59,8 @@ cp .env.example .env
 SILICONFLOW_API_KEY=your_siliconflow_api_key_here
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V4-Flash
+SILICONFLOW_MAX_REQUESTS_PER_MINUTE=60
+SILICONFLOW_MAX_CONCURRENCY=4
 ```
 
 ### 2. 本地开发启动
@@ -71,24 +77,28 @@ python -m src.backend.main
 
 ```bash
 cd src/frontend
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
 前端辩论接口默认访问 `http://localhost:8000/api/v1`，聊天接口默认访问
 `http://localhost:8000/api`。如后端地址不同，可分别设置
-`VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL`。
+`VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL`。建议在
+`src/frontend/.env.local` 中保存本地前端配置；任何 `VITE_*` 变量都会进入浏览器包，
+不得放入 API Key 或其他敏感信息。
 
 访问 http://localhost:5173 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
 
-### 3. Docker 一键启动
+### 3. Docker Compose 一键启动
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-当前 Docker 配置尚未接入 Vite 前端构建流程。本地前端开发请使用 `pnpm dev`，Docker
-适配将在后续变更中单独完成。
+访问 http://localhost:3000 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
+前端镜像通过 pnpm 构建 Vite 产物，并由 Nginx 托管；`/chat`、`/debate` 支持直接访问
+和刷新，`/api/` 由 Nginx 反向代理到 FastAPI。后端容器的存活检查只访问轻量根接口，
+不会周期性调用 LLM 或 TTS。
 
 ## 项目结构
 
@@ -112,9 +122,12 @@ cyber-foodie-debate/
 │   └── frontend/                # React + TypeScript 独立前端应用
 │       ├── src/
 │       │   ├── components/ui/   # shadcn/ui 基础组件
+│       │   ├── features/chat/   # 自由聊页面、状态、本地存储与 API
 │       │   ├── features/debate/ # 辩论页面、状态与 API 逻辑
 │       │   ├── lib/sse.ts       # POST SSE 流解析器
-│       │   └── types/debate.ts  # 辩论领域类型
+│       │   └── types/           # 聊天与辩论领域类型
+│       ├── Dockerfile            # Vite 构建 + Nginx 运行镜像
+│       ├── nginx.conf            # SPA 回退与 /api/ 反向代理
 │       ├── package.json
 │       └── vite.config.ts
 ├── tests/
@@ -122,7 +135,7 @@ cyber-foodie-debate/
 │   └── bdd/features/            # BDD 验收测试
 ├── eval/                        # 评测数据集
 ├── .env.example                 # 环境变量模板
-├── Dockerfile                   # 容器化封装
+├── Dockerfile                   # FastAPI 后端镜像
 ├── docker-compose.yml           # 编排启动
 ├── AGENTS.md                    # AI 规则注入
 └── README.md                    # 本文件
@@ -183,6 +196,10 @@ cyber-foodie-debate/
 上游失败，则发送 `error` 事件。当前聊天响应中的 `tts.status` 固定为
 `not_requested`，仅作为下一步接入 edge-tts 的扩展点。
 
+辩论流依次发送 `session_start`、多个 `round`、`result`；只有有效裁决才会发送
+`result`。上游失败或整体超时时发送结构化 `error`，客户端不得把它显示为完成。
+后端通过环境变量限制 SiliconFlow 每分钟请求数与进程内并发数。
+
 前端通过顶部“功能页面”选择器在 `/chat` 与 `/debate` 之间切换。AI 回复会经过
 安全的 Markdown 组件渲染，不会直接显示加粗、列表等 Markdown 源标记。
 
@@ -199,7 +216,10 @@ cyber-foodie-debate/
 - **TTS**: Microsoft edge-tts
 - **测试**: pytest / behave (BDD) / Vitest / Testing Library
 - **CI/CD**: GitHub Actions
-- **容器**: Docker / docker-compose
+- **容器**: Docker / Docker Compose
+
+更完整的前后端分层、数据流、状态机和 SSE 时序见
+[`docs/system_design.md`](docs/system_design.md)。
 
 ## 前端质量检查
 
@@ -210,6 +230,8 @@ pnpm test
 pnpm typecheck
 pnpm build
 ```
+
+后端质量检查与完整贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 团队与贡献
 

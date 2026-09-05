@@ -15,7 +15,9 @@ logger = logging.getLogger("cyber_foodie_debate")
 
 def main():
     """启动后端服务。"""
-    logger.info(f"Starting Cyber Foodie Debate API on {settings.app_host}:{settings.app_port}")
+    logger.info(
+        f"Starting Cyber Foodie Debate API on {settings.app_host}:{settings.app_port}"
+    )
     uvicorn.run(
         "src.backend.app:app",
         host=settings.app_host,

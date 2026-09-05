@@ -1,29 +1,49 @@
-version: '3.8'
-
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: cyber-foodie-backend
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      SILICONFLOW_BASE_URL: ${SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
+      SILICONFLOW_MODEL: ${SILICONFLOW_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
+      SILICONFLOW_MAX_REQUESTS_PER_MINUTE: ${SILICONFLOW_MAX_REQUESTS_PER_MINUTE:-60}
+      SILICONFLOW_MAX_CONCURRENCY: ${SILICONFLOW_MAX_CONCURRENCY:-4}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2).read()
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 10s
 
   frontend:
-    image: nginx:alpine
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+        VITE_CHAT_API_BASE_URL: /api
     container_name: cyber-foodie-frontend
     ports:
       - "3000:80"
-    volumes:
-      - ./src/frontend:/usr/share/nginx/html:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

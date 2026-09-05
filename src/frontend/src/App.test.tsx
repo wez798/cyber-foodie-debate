@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import App from "@/App"
 import { streamDebate } from "@/features/debate/api/debate-api"
-import type { DebateStreamEvent } from "@/types/debate"
+import type { DebateStreamEvent, ResultData } from "@/types/debate"
 
 vi.mock("@/features/debate/api/debate-api", () => ({
   streamDebate: vi.fn(),
@@ -18,6 +18,19 @@ const rounds = Array.from({ length: 6 }, (_, index) => ({
   speaker: index % 2 === 0 ? ("sichuan_spicy" as const) : ("cantonese_healthy" as const),
   content: `第 ${Math.floor(index / 2) + 1} 轮观点 ${index + 1}`,
 }))
+
+const completedResult: ResultData = {
+  session_id: "session-1",
+  status: "completed",
+  rounds,
+  result: {
+    winner: "sichuan_spicy",
+    recommendation: "天气凉爽，麻辣香锅更适合今天。",
+    dish_name: "麻辣香锅",
+    restaurant_suggestion: "学校二食堂",
+    confidence: 0.86,
+  },
+}
 
 const completeStream: typeof streamDebate = async (_request, options) => {
   options.onOpen?.()
@@ -37,22 +50,12 @@ const completeStream: typeof streamDebate = async (_request, options) => {
     ),
     {
       event: "result",
-      data: {
-        session_id: "session-1",
-        status: "completed",
-        rounds,
-        result: {
-          winner: "sichuan_spicy",
-          recommendation: "天气凉爽，麻辣香锅更适合今天。",
-          dish_name: "麻辣香锅",
-          restaurant_suggestion: "学校二食堂",
-          confidence: 0.86,
-        },
-      },
+      data: completedResult,
     },
   ]
 
   for (const event of events) options.onEvent(event)
+  return completedResult
 }
 
 async function fillRequiredFields() {
@@ -133,7 +136,7 @@ describe("Cyber Foodie Debate app", () => {
 
   it("disables submission while the stream is pending", async () => {
     streamDebateMock.mockImplementation(
-      () => new Promise<void>(() => undefined),
+      () => new Promise<never>(() => undefined),
     )
     render(<App />)
     const user = await fillRequiredFields()

@@ -30,16 +30,51 @@ class DebateStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     TIMEOUT = "timeout"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class FoodPreference(BaseModel):
     """用户饮食偏好。"""
 
-    口味: str = Field(..., description="口味偏好，如：辣、清淡、酸甜")
-    预算: str = Field(..., description="预算范围，如：10-20元")
-    天气: Optional[str] = Field(None, description="当前天气，如：晴天、雨天")
-    忌口: Optional[str] = Field(None, description="忌口/过敏信息")
-    其他要求: Optional[str] = Field(None, description="其他特殊要求")
+    model_config = ConfigDict(extra="forbid")
+
+    口味: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="口味偏好，如：辣、清淡、酸甜",
+    )
+    预算: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="预算范围，如：10-20元",
+    )
+    天气: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="当前天气，如：晴天、雨天",
+    )
+    忌口: Optional[str] = Field(None, max_length=200, description="忌口/过敏信息")
+    其他要求: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="其他特殊要求",
+    )
+
+    @field_validator("口味", "预算", mode="before")
+    @classmethod
+    def strip_required_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("天气", "忌口", "其他要求", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
 
 class DebateRound(BaseModel):
@@ -59,6 +94,18 @@ class DebateResult(BaseModel):
     dish_name: str
     restaurant_suggestion: Optional[str] = None
     confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class DebateJudgeOutput(BaseModel):
+    """Validated structured output requested from the debate judge LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    winner: Literal["sichuan_spicy", "cantonese_healthy"]
+    recommendation: str = Field(min_length=1, max_length=1000)
+    dish_name: str = Field(min_length=1, max_length=200)
+    restaurant: Optional[str] = Field(default=None, max_length=300)
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class DebateSession(BaseModel):
@@ -91,6 +138,45 @@ class DebateResponse(BaseModel):
     status: DebateStatus
     rounds: list[DebateRound]
     result: Optional[DebateResult] = None
+
+
+class DebateSessionStartData(BaseModel):
+    """Data emitted when a debate stream starts."""
+
+    session_id: str
+    status: Literal["running"] = "running"
+
+
+class DebateRoundData(BaseModel):
+    """Data emitted for one streamed debate argument."""
+
+    round: DebateRound
+    side: Literal["agent_a", "agent_b"]
+
+
+class DebateResultData(BaseModel):
+    """Data emitted only after a debate completes successfully."""
+
+    session_id: str
+    status: Literal["completed"] = "completed"
+    rounds: list[DebateRound]
+    result: DebateResult
+
+
+class DebateErrorDetail(BaseModel):
+    """Safe error information emitted by the debate stream."""
+
+    code: str
+    message: str
+    retryable: bool = False
+
+
+class DebateStreamErrorData(BaseModel):
+    """Terminal failure emitted after SSE response headers were sent."""
+
+    session_id: str
+    status: Literal["failed", "timeout"]
+    error: DebateErrorDetail
 
 
 class HealthCheck(BaseModel):
@@ -170,6 +256,10 @@ class ChatRequest(BaseModel):
     def latest_message_must_be_from_user(self) -> "ChatRequest":
         if self.messages[-1].role != "user":
             raise ValueError("最后一条消息必须来自用户")
+        total_chars = sum(len(message.content) for message in self.messages)
+        total_chars += len(self.topic or "")
+        if total_chars > 64_000:
+            raise ValueError("对话上下文总长度不能超过 64000 字符")
         return self
 
 

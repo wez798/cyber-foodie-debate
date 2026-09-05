@@ -8,11 +8,13 @@
 ## 技术栈约束
 
 - **后端**: Python 3.11 + FastAPI + Pydantic v2
-- **前端**: 原生 HTML/CSS/JS（MVP阶段）
+- **前端**: React 19 + TypeScript（strict）+ Vite 8
+- **UI**: Tailwind CSS v4 + shadcn/ui + Lucide React
 - **LLM**: 硅基流动 DeepSeek-V4-Flash
 - **TTS**: 微软 edge-tts（Sprint 3 接入）
-- **测试**: pytest + behave (BDD)
-- **容器**: Docker + docker-compose
+- **测试**: pytest + behave (BDD) + Vitest + Testing Library
+- **包管理**: 后端 pip，前端 pnpm（提交 `pnpm-lock.yaml`）
+- **容器**: Docker + Docker Compose（FastAPI 后端 + Vite 构建/Nginx 前端）
 
 ## 协作范式
 
@@ -31,6 +33,10 @@
 - 异步代码使用 async/await，禁止混用同步阻塞调用
 - 异常处理使用 tenacity 指数退避重试
 - 敏感信息（API Key）严禁硬编码，必须从 .env 读取
+- TypeScript 必须保持 `strict`，禁止用 `any` 绕过接口契约
+- React 组件优先复用 `components/ui/` 中的 shadcn/ui 基础组件
+- 前端新增或修改功能时同步补充 Vitest/Testing Library 测试
+- 前端提交前必须通过 `pnpm test`、`pnpm typecheck` 和 `pnpm build`
 
 ## 架构约束
 
@@ -38,6 +44,10 @@
 - 服务层禁止直接访问 HTTP 层，必须通过依赖注入
 - 所有外部 API 调用必须封装在 services/ 目录
 - 数据模型统一在 models.py 中定义
+- 前端按 `features/` 组织业务模块，通用 UI 放在 `components/ui/`，协议与工具放在 `lib/` 和 `types/`
+- 浏览器只能访问 FastAPI 暴露的业务接口，严禁在前端环境变量中保存 LLM API Key
+- 前后端新增或修改接口时，必须同步更新 Pydantic Schema、TypeScript 类型、测试和 API 文档
+- 流式接口统一使用 POST SSE，客户端必须处理完成、错误、取消和响应提前结束
 
 ## Git 规范
 
