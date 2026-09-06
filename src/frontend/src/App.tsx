@@ -1,15 +1,23 @@
-import { AlertCircle, ChefHat, RotateCcw, ShieldCheck } from "lucide-react"
-import { useEffect, useState } from "react"
+import { AlertCircle, ChefHat, LogOut, RotateCcw, ShieldCheck } from "lucide-react"
+import { useEffect } from "react"
+import {
+  BrowserRouter,
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom"
 import { toast } from "sonner"
 
+import { PageModeSwitch, type PageMode } from "@/components/page-mode-switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  PageModeSwitch,
-  type PageMode,
-} from "@/components/page-mode-switch"
 import { Toaster } from "@/components/ui/sonner"
+import { AuthProvider, useAuth } from "@/features/auth/auth-context"
+import { AuthPage } from "@/features/auth/auth-page"
 import { ChatPanel } from "@/features/chat/chat-panel"
 import { DebateArena } from "@/features/debate/components/debate-arena"
 import { PreferenceForm } from "@/features/debate/components/preference-form"
@@ -25,14 +33,13 @@ const phaseLabel = {
   error: "需重试",
 }
 
-type AppPage = PageMode
-
-function pageFromPath(): AppPage {
-  return window.location.pathname === "/debate" ? "debate" : "chat"
-}
-
-export default function App() {
-  const [page, setPage] = useState<AppPage>(pageFromPath)
+function AppShell() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { user, loading, logout } = useAuth()
+  const page: PageMode = location.pathname.startsWith("/debate")
+    ? "debate"
+    : "chat"
   const {
     state,
     audioUrl,
@@ -45,25 +52,14 @@ export default function App() {
   } = useDebate()
 
   useEffect(() => {
-    if (!["/chat", "/debate"].includes(window.location.pathname)) {
-      window.history.replaceState(null, "", "/chat")
-    }
-    const handlePopState = () => setPage(pageFromPath())
-    window.addEventListener("popstate", handlePopState)
-    return () => window.removeEventListener("popstate", handlePopState)
-  }, [])
-
-  useEffect(() => {
     document.title =
       page === "chat"
         ? "自由聊 | Cyber Foodie Debate"
         : "AI 校园干饭辩论赛 | Cyber Foodie Debate"
   }, [page])
 
-  const handlePageChange = (nextPage: AppPage) => {
-    if (nextPage === page) return
-    window.history.pushState(null, "", nextPage === "chat" ? "/chat" : "/debate")
-    setPage(nextPage)
+  const handlePageChange = (nextPage: PageMode) => {
+    navigate(nextPage === "chat" ? "/chat" : "/debate")
   }
 
   const handleSubmit = async (preference: FoodPreference) => {
@@ -89,6 +85,56 @@ export default function App() {
     toast.info("已取消本场辩论")
   }
 
+  const handleLogout = async () => {
+    try {
+      await logout()
+      navigate("/chat", { replace: true })
+      toast.success("已安全退出")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "退出失败")
+    }
+  }
+
+  const debatePage = (
+    <section className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+      <aside className="lg:sticky lg:top-6">
+        <PreferenceForm
+          phase={state.phase}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+        />
+      </aside>
+
+      <div className="min-w-0">
+        {state.error && (
+          <Alert variant="destructive" className="mb-5">
+            <AlertCircle aria-hidden="true" />
+            <AlertTitle>赛场连接中断</AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>{state.error}</span>
+              <Button size="sm" variant="outline" onClick={handleRetry}>
+                <RotateCcw aria-hidden="true" />
+                重试
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <DebateArena state={state} />
+
+        {state.result && (
+          <ResultPanel
+            result={state.result}
+            audioUrl={audioUrl}
+            isAudioLoading={isAudioLoading}
+            onPlay={handlePlay}
+            onReset={reset}
+          />
+        )}
+      </div>
+    </section>
+  )
+
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="border-b bg-[#fffdf8]">
@@ -109,10 +155,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <PageModeSwitch
-              value={page}
-              onChange={handlePageChange}
-            />
+            <PageModeSwitch value={page} onChange={handlePageChange} />
             {page === "debate" && (
               <>
                 <Badge variant="outline" className="bg-background">
@@ -125,14 +168,33 @@ export default function App() {
                       ? "bg-[#277a68] text-white hover:bg-[#277a68]"
                       : undefined
                   }
-                  variant={
-                    state.phase === "streaming" ? "default" : "secondary"
-                  }
+                  variant={state.phase === "streaming" ? "default" : "secondary"}
                 >
                   {phaseLabel[state.phase]}
                 </Badge>
               </>
             )}
+            {!loading &&
+              (user ? (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">
+                    {user.display_name || user.email}
+                  </Badge>
+                  <Button size="sm" variant="outline" onClick={handleLogout}>
+                    <LogOut aria-hidden="true" />
+                    退出
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link to="/login">登录</Link>
+                  </Button>
+                  <Button size="sm" asChild>
+                    <Link to="/register">注册</Link>
+                  </Button>
+                </>
+              ))}
           </div>
         </div>
       </header>
@@ -145,47 +207,12 @@ export default function App() {
           aria-labelledby={`page-tab-${page}`}
           className="page-content-enter"
         >
-          {page === "chat" ? (
-            <ChatPanel />
-          ) : (
-            <section className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
-              <aside className="lg:sticky lg:top-6">
-                <PreferenceForm
-                  phase={state.phase}
-                  onSubmit={handleSubmit}
-                  onCancel={handleCancel}
-                />
-              </aside>
-
-              <div className="min-w-0">
-                {state.error && (
-                  <Alert variant="destructive" className="mb-5">
-                    <AlertCircle aria-hidden="true" />
-                    <AlertTitle>赛场连接中断</AlertTitle>
-                    <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <span>{state.error}</span>
-                      <Button size="sm" variant="outline" onClick={handleRetry}>
-                        <RotateCcw aria-hidden="true" />
-                        重试
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <DebateArena state={state} />
-
-                {state.result && (
-                  <ResultPanel
-                    result={state.result}
-                    audioUrl={audioUrl}
-                    isAudioLoading={isAudioLoading}
-                    onPlay={handlePlay}
-                    onReset={reset}
-                  />
-                )}
-              </div>
-            </section>
-          )}
+          <Routes>
+            <Route path="/chat" element={<ChatPanel />} />
+            <Route path="/chat/:conversationId" element={<ChatPanel />} />
+            <Route path="/debate" element={debatePage} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
         </div>
       </main>
 
@@ -197,5 +224,25 @@ export default function App() {
       </footer>
       <Toaster position="top-center" richColors closeButton />
     </div>
+  )
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/register" element={<AuthPage mode="register" />} />
+      <Route path="/*" element={<AppShell />} />
+    </Routes>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   )
 }

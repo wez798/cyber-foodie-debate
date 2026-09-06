@@ -40,6 +40,11 @@ yarn-error.log*
 data/*.db
 data/*.json
 !data/.gitkeep
+tmp/
+
+# Local reference materials
+/*.pdf
+/*.png
 
 # Test coverage
 .coverage

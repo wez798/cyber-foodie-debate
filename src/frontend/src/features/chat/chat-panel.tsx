@@ -1,17 +1,20 @@
 import {
   Bot,
+  Cloud,
+  LogIn,
   MessageCircleMore,
   Send,
   Square,
   Trash2,
   UserRound,
 } from "lucide-react"
-import type { FormEvent, KeyboardEvent } from "react"
+import { useCallback, useState, type FormEvent, type KeyboardEvent } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
 
+import { MarkdownContent } from "@/components/markdown-content"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MarkdownContent } from "@/components/markdown-content"
 import {
   Card,
   CardContent,
@@ -21,19 +24,46 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { useAuth } from "@/features/auth/auth-context"
+import { ConversationHistory } from "@/features/chat/conversation-history"
 import { useChat } from "@/features/chat/use-chat"
+import { useCloudChat } from "@/features/chat/use-cloud-chat"
 
 export function ChatPanel() {
-  const {
-    state,
-    draft,
-    setDraft,
-    setTopic,
-    send,
-    stop,
-    reset,
-  } = useChat()
+  const { conversationId: routeConversationId } = useParams()
+  const navigate = useNavigate()
+  const { user, loading, refresh } = useAuth()
+  const [historyVersion, setHistoryVersion] = useState(0)
+  const guestChat = useChat()
+
+  const handleHistoryChanged = useCallback(() => {
+    setHistoryVersion((version) => version + 1)
+  }, [])
+  const handleConversationResolved = useCallback(
+    (conversationId: string) => {
+      navigate(`/chat/${conversationId}`, { replace: true })
+    },
+    [navigate],
+  )
+  const handleUnauthorized = useCallback(() => {
+    void refresh()
+  }, [refresh])
+  const cloudChat = useCloudChat({
+    enabled: Boolean(user),
+    routeConversationId: routeConversationId ?? null,
+    onConversationResolved: handleConversationResolved,
+    onHistoryChanged: handleHistoryChanged,
+    onUnauthorized: handleUnauthorized,
+  })
+
+  const chat = user ? cloudChat : guestChat
+  const { state, draft, setDraft, setTopic, send, stop } = chat
   const isStreaming = state.phase === "streaming"
+
+  const handleReset = () => {
+    chat.reset()
+    if (user) navigate("/chat")
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -47,6 +77,16 @@ export function ChatPanel() {
     }
   }
 
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-sm text-muted-foreground">
+          正在确认登录状态…
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card className="gap-0 overflow-hidden border-border/90 py-0 shadow-none">
       <CardHeader className="gap-4 border-b bg-[#fffdf8] px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -57,17 +97,26 @@ export function ChatPanel() {
               自由聊
             </CardTitle>
             <Badge variant="secondary">含校园干饭推荐</Badge>
-            <Badge variant="outline">TTS 扩展点已预留</Badge>
+            {user ? (
+              <Badge variant="outline">
+                <Cloud aria-hidden="true" />
+                云端保存
+              </Badge>
+            ) : (
+              <Badge variant="outline">游客本地保存</Badge>
+            )}
           </div>
           <CardDescription>
-            聊校园生活，也可按预算、口味与忌口获得干饭推荐；最近对话保存在本浏览器。
+            {user
+              ? "消息由服务端保存，可在刷新或重新登录后恢复。"
+              : "游客最近对话仅保存在本浏览器；登录后可使用云端历史。"}
           </CardDescription>
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={reset}
+          onClick={handleReset}
           disabled={isStreaming}
         >
           <Trash2 aria-hidden="true" />
@@ -75,8 +124,27 @@ export function ChatPanel() {
         </Button>
       </CardHeader>
 
-      <CardContent className="grid gap-0 px-0 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <CardContent className="grid gap-0 px-0 lg:grid-cols-[260px_minmax(0,1fr)]">
         <div className="space-y-4 border-b bg-muted/25 p-5 lg:border-r lg:border-b-0">
+          {user ? (
+            <ConversationHistory
+              activeId={state.conversationId}
+              refreshVersion={historyVersion}
+              onSelect={(conversationId) => navigate(`/chat/${conversationId}`)}
+              onNew={handleReset}
+              onChanged={handleHistoryChanged}
+            />
+          ) : (
+            <div className="rounded-md border bg-background p-3 text-xs leading-5 text-muted-foreground">
+              <p>登录后可跨设备保存和恢复聊天历史。</p>
+              <Button className="mt-3 w-full" size="sm" variant="outline" asChild>
+                <Link to="/login">
+                  <LogIn aria-hidden="true" />
+                  登录并启用云端历史
+                </Link>
+              </Button>
+            </div>
+          )}
           <div className="space-y-2">
             <label htmlFor="chat-topic" className="text-sm font-medium">
               话题
@@ -87,7 +155,7 @@ export function ChatPanel() {
               onChange={(event) => setTopic(event.target.value)}
               placeholder="例如：一食堂还是二食堂"
               maxLength={200}
-              disabled={isStreaming}
+              disabled={isStreaming || Boolean(user && state.conversationId)}
             />
           </div>
           <div className="rounded-md border bg-background p-3 text-xs leading-5 text-muted-foreground">
@@ -96,7 +164,7 @@ export function ChatPanel() {
             </p>
             {state.updatedAt && (
               <p className="mt-1">
-                已恢复：{new Date(state.updatedAt).toLocaleString()}
+                最近更新：{new Date(state.updatedAt).toLocaleString()}
               </p>
             )}
           </div>

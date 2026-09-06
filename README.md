@@ -13,12 +13,13 @@ graph TB
     subgraph 前端层
         A[用户浏览器] --> B[React + TypeScript]
         B --> C[Vite + Tailwind CSS v4 + shadcn/ui]
-        B --> K[localStorage 最近对话]
+        B --> K[游客 localStorage]
     end
 
     subgraph 后端服务层
         C --> D[FastAPI API]
         D --> L[通用对话服务 ChatService]
+        D --> M[认证与云端会话服务]
         D --> E[辩论编排服务 DebateService]
         L --> F[LLM 调用服务]
         E --> F[LLM 调用服务]
@@ -32,6 +33,7 @@ graph TB
 
     subgraph 数据层
         E --> J[内存辩论会话]
+        M --> N[(PostgreSQL<br/>用户 / Session / 会话 / 消息)]
     end
 ```
 
@@ -69,6 +71,9 @@ SILICONFLOW_MAX_CONCURRENCY=4
 # 安装后端依赖
 pip install -r src/backend/requirements.txt
 
+# 创建数据库并执行迁移（DATABASE_URL 取自 .env）
+alembic upgrade head
+
 # 启动后端服务
 python -m src.backend.main
 ```
@@ -83,7 +88,9 @@ pnpm dev
 
 前端辩论接口默认访问 `http://localhost:8000/api/v1`，聊天接口默认访问
 `http://localhost:8000/api`。如后端地址不同，可分别设置
-`VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL`。建议在
+`VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL`。未覆盖时，开发前端会使用当前页面的
+协议与主机名连接其 `8000` 端口，避免 `localhost` 与 `127.0.0.1` 混用导致 Cookie
+失效。建议在
 `src/frontend/.env.local` 中保存本地前端配置；任何 `VITE_*` 变量都会进入浏览器包，
 不得放入 API Key 或其他敏感信息。
 
@@ -95,10 +102,15 @@ pnpm dev
 docker compose up --build
 ```
 
+Compose 要求先在 `.env` 中设置 `POSTGRES_PASSWORD`。生产 HTTPS 部署还必须设置
+`SESSION_COOKIE_SECURE=true`，并把 `FRONTEND_ORIGINS` 改为实际前端来源的 JSON 数组；
+这两个值会由 Compose 原样传给后端，不需要修改编排文件。
+
 访问 http://localhost:3000 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
 前端镜像通过 pnpm 构建 Vite 产物，并由 Nginx 托管；`/chat`、`/debate` 支持直接访问
 和刷新，`/api/` 由 Nginx 反向代理到 FastAPI。后端容器的存活检查只访问轻量根接口，
-不会周期性调用 LLM 或 TTS。
+不会周期性调用 LLM 或 TTS。Nginx 对认证入口和其余 API 分别实施按 IP 限流；若前面
+还有反向代理，应同时配置可信真实客户端 IP 传递规则。
 
 ## 项目结构
 
@@ -115,7 +127,9 @@ cyber-foodie-debate/
 ├── src/
 │   ├── backend/                 # FastAPI 后端服务
 │   │   ├── api/                 # API 路由层
+│   │   ├── repositories/        # SQLAlchemy 数据访问层
 │   │   ├── services/            # 业务逻辑层
+│   │   ├── db_models.py         # SQLAlchemy 持久化实体
 │   │   ├── models.py            # Pydantic 数据模型
 │   │   ├── config.py            # 配置管理
 │   │   └── app.py               # 应用工厂
@@ -132,7 +146,9 @@ cyber-foodie-debate/
 │       └── vite.config.ts
 ├── tests/
 │   ├── unit/                    # 单元测试
+│   ├── integration/             # 认证与数据库集成测试
 │   └── bdd/features/            # BDD 验收测试
+├── alembic/                     # 数据库迁移
 ├── eval/                        # 评测数据集
 ├── .env.example                 # 环境变量模板
 ├── Dockerfile                   # FastAPI 后端镜像
@@ -151,9 +167,9 @@ cyber-foodie-debate/
 | 流式响应       | POST SSE 实时辩论直播   | ✅ MVP      |
 | 双页面交互     | 自由聊与辩论赛独立切换  | ✅ MVP      |
 | 自由聊推荐     | 推荐能力内置且 Prompt 模式不可见 | ✅ MVP |
-| 对话历史       | 浏览器 localStorage 最近会话 | ✅ MVP  |
+| 对话历史       | 游客本地保存；登录用户云端分页持久化 | ✅ MVP  |
 | TTS语音播报    | 微软TTS朗读辩论结果     | ✅ MVP      |
-| 后端对话持久化 | conversation_id 已预留  | 🔄 后续     |
+| 后端对话持久化 | PostgreSQL + Alembic，支持中断终态与幂等重放 | ✅ MVP |
 | GitHub API集成 | 自动获取commit生成梗图  | ❌ 规划中   |
 
 ## API 文档
@@ -167,6 +183,14 @@ cyber-foodie-debate/
 | GET  | `/api/v1/health`              | 健康检查 |
 | POST | `/api/chat`                   | 非流式对话兜底 |
 | POST | `/api/chat/stream`            | POST SSE 流式对话 |
+| POST | `/api/v1/auth/register`       | 注册并创建安全会话 |
+| POST | `/api/v1/auth/login`          | 登录并创建安全会话 |
+| POST | `/api/v1/auth/logout`         | 撤销当前会话 |
+| GET  | `/api/v1/auth/me`             | 获取当前用户 |
+| GET/POST | `/api/v1/conversations` | 分页查询/创建云端会话 |
+| GET/PATCH/DELETE | `/api/v1/conversations/{id}` | 查询、更新或软删除会话 |
+| GET  | `/api/v1/conversations/{id}/messages` | 分页查询持久化消息 |
+| POST | `/api/v1/conversations/{id}/messages/stream` | 持久化 POST SSE 对话 |
 | POST | `/api/v1/debate/start`        | 启动辩论 |
 | POST | `/api/v1/debate/start-stream` | 流式启动三轮辩论 |
 | GET  | `/api/v1/debate/{session_id}` | 查询会话 |
@@ -203,9 +227,10 @@ cyber-foodie-debate/
 前端通过顶部“功能页面”选择器在 `/chat` 与 `/debate` 之间切换。AI 回复会经过
 安全的 Markdown 组件渲染，不会直接显示加粗、列表等 Markdown 源标记。
 
-聊天历史只保存在浏览器 localStorage，键为
-`cyber-foodie-debate:recent-chat`，内容包含 `conversation_id`、`messages`、
-`mode`、`topic` 和 `updated_at`；后端当前不保存聊天内容。
+游客聊天历史只保存在浏览器 localStorage，键为
+`cyber-foodie-debate:recent-chat`。登录后，前端改用受认证与 CSRF 保护的云端接口，
+消息写入 PostgreSQL，并沿 `next_cursor` 自动拉取全部历史页。密码使用 Argon2id；浏览器
+只持有 HttpOnly 不透明会话 Cookie 和可读的 CSRF Cookie，数据库仅保存令牌哈希。
 
 ## 技术栈
 

@@ -1,7 +1,7 @@
 # 系统架构设计规约 — Cyber Foodie Debate
 
 > 当前基线：React 19 + TypeScript + Vite 前端，FastAPI + Pydantic v2 后端。
-> 本文描述当前已实现的运行时边界；数据库持久化仍属于后续工作。
+> 本文描述当前已实现的运行时边界，包括第一方认证与 PostgreSQL 云端对话持久化。
 
 ---
 
@@ -25,6 +25,8 @@ graph LR
         UC5[查看裁决与推荐]
         UC6[播放语音战报]
         UC7[恢复浏览器最近对话]
+        UC8[注册 / 登录 / 退出]
+        UC9[跨设备恢复云端对话]
     end
 
     U --> UC1
@@ -34,6 +36,8 @@ graph LR
     U --> UC5
     U --> UC6
     U --> UC7
+    U --> UC8
+    U --> UC9
     UC1 -.调用.-> LLM_API
     UC3 -.调用.-> LLM_API
     UC6 -.调用.-> TTS_API
@@ -60,6 +64,14 @@ graph TB
     CS --> CAR
     CAR -->|start / delta / done / error| CHAT
     CHAT --> LS[localStorage 最近对话]
+    CHAT -->|登录用户 POST SSE| PCR[Conversation Router]
+    PCR --> PCS[ConversationService]
+    PCS --> PR[ConversationRepository]
+    PR --> PG[(PostgreSQL)]
+    R -->|认证 / Session / CSRF| AR[Auth Router]
+    AR --> AS[AuthService]
+    AS --> ARepo[AuthRepository]
+    ARepo --> PG
 
     SW --> DEBATE[辩论 feature]
     DEBATE --> DR[DebateRequest]
@@ -139,6 +151,20 @@ classDiagram
         +reset()
     }
 
+    class ConversationService {
+        +create() ConversationResponse
+        +messages() MessagePage
+        +prepare_generation() PreparedGeneration
+        +stream_generation() AsyncIterator
+    }
+
+    class AuthService {
+        +register() IssuedSession
+        +login() IssuedSession
+        +authenticate() CurrentSession
+        +logout()
+    }
+
     class UseDebate {
         +DebateViewState state
         +start()
@@ -156,6 +182,8 @@ classDiagram
     ChatService --> ChatRequest : validates input
     ChatService --> ChatResponse : returns
     UseChat --> ChatRequest : sends
+    ConversationService --> ChatService : delegates LLM generation
+    AuthService --> User : authenticates
     UseDebate --> FoodPreference : collects
 ```
 
@@ -167,24 +195,22 @@ classDiagram
 ```mermaid
 graph LR
     subgraph 浏览器
-        CHAT_STATE[ChatViewState]
-        LOCAL[(localStorage<br/>cyber-foodie-debate:recent-chat)]
-        CHAT_STATE <--> LOCAL
+        GUEST[游客 ChatViewState] <--> LOCAL[(localStorage)]
+        CLOUD[登录用户 ChatViewState]
+        COOKIE[HttpOnly Session + CSRF Cookie]
     end
 
-    subgraph FastAPI 进程
-        SERVICE[DebateService]
-        SESSIONS[(sessions 字典)]
-        SERVICE <--> SESSIONS
-    end
-
-    RESTART[页面刷新] --> LOCAL
-    PROCESS_RESTART[后端进程重启] -.清空.-> SESSIONS
+    CLOUD --> API[FastAPI]
+    COOKIE --> API
+    API --> DB[(PostgreSQL<br/>users / auth_sessions / conversations / messages)]
+    API --> SESSIONS[(内存 DebateSession)]
 ```
 
-- 自由聊只保存最近一次浏览器会话，后端不持久化聊天消息。
-- 辩论会话只保存在当前 FastAPI 进程内存中，进程重启后丢失。
-- `conversation_id` 是后端持久化的扩展点，不代表当前已经接入数据库。
+- 游客自由聊只保存最近一次浏览器会话；登录用户的会话和消息写入 PostgreSQL。
+- 云端消息使用 `(conversation_id, sequence_no)` 排序并通过游标分页，前端恢复时拉取全部页。
+- 认证使用 Argon2id 密码哈希和可撤销不透明 Session；数据库只存 Session/CSRF 哈希。
+- 每个会话最多一个 `generating` 助手消息，唯一约束负责多实例并发互斥；失败、取消和过期生成均落终态。
+- 辩论会话仍只保存在当前 FastAPI 进程内存中，进程重启后丢失。
 
 ---
 
@@ -203,7 +229,7 @@ sequenceDiagram
 
     alt 自由聊
         U->>FE: 输入消息并发送
-        FE->>API: POST /api/chat/stream
+        FE->>API: 游客 POST /api/chat/stream<br/>登录用户 POST /api/v1/conversations/{id}/messages/stream
         API->>SVC: 校验并组装可信 Prompt
         SVC->>LLM: 流式 Chat Completions
         API-->>FE: start
@@ -212,7 +238,13 @@ sequenceDiagram
             API-->>FE: delta
         end
         API-->>FE: done 或 error
-        FE->>FE: 更新 UI 与 localStorage
+        FE->>FE: 更新 UI
+        opt 游客
+            FE->>FE: 写入 localStorage
+        end
+        opt 登录用户
+            API->>API: 原子写入用户消息与生成终态
+        end
     else 三轮辩论
         U->>FE: 提交 FoodPreference
         FE->>API: POST /api/v1/debate/start-stream
@@ -261,12 +293,15 @@ stateDiagram-v2
 
 - Vite 开发服务器默认监听 `127.0.0.1:5173`。
 - FastAPI 默认监听 `0.0.0.0:8000`，Swagger UI 位于 `/docs`。
-- 辩论 API 默认前缀为 `/api/v1`，聊天 API 默认前缀为 `/api`。
+- 辩论、认证和云端会话 API 默认前缀为 `/api/v1`，游客聊天 API 默认前缀为 `/api`。
 - 浏览器通过 `VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL` 覆盖后端地址。
 - 根目录 `Dockerfile` 构建 FastAPI 后端，`src/frontend/Dockerfile` 通过 pnpm 构建
   Vite 产物并交给 Nginx 托管。
 - 容器前端使用相对 `/api` 地址，由 Nginx 反向代理后端，并为 History API 路由提供
   `index.html` 回退。
+- `FRONTEND_ORIGINS` 是允许携带凭据的浏览器来源 JSON 数组；HTTPS 部署必须同时设置
+  `SESSION_COOKIE_SECURE=true`。Compose 从 `.env` 透传二者。
+- Nginx 对登录/注册和其余 `/api/` 请求分别按客户端 IP 限流。
 - Docker 健康检查只访问本地轻量存活接口，不调用真实 LLM 或 TTS。
 - `DebateService` 对完整辩论设置整体超时；失败、超时和取消不会生成兜底成功结果。
 - `LLMService` 同时限制进程内并发和每分钟上游调用数，超过本地频率限制时快速返回 429。

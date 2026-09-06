@@ -77,7 +77,7 @@ describe("Cyber Foodie Debate app", () => {
     render(<App />)
     const user = userEvent.setup()
 
-    expect(screen.getByText("擂台主持人已就位")).toBeInTheDocument()
+    expect(await screen.findByText("擂台主持人已就位")).toBeInTheDocument()
     expect(screen.queryByLabelText("口味偏好")).not.toBeInTheDocument()
     const chatTab = screen.getByRole("tab", { name: "自由聊" })
     const debateTab = screen.getByRole("tab", { name: "辩论赛" })
@@ -101,7 +101,7 @@ describe("Cyber Foodie Debate app", () => {
 
     await user.click(chatTab)
     expect(window.location.pathname).toBe("/chat")
-    expect(screen.getByText("擂台主持人已就位")).toBeInTheDocument()
+    expect(await screen.findByText("擂台主持人已就位")).toBeInTheDocument()
   })
 
   it("supports arrow-key page switching", async () => {
