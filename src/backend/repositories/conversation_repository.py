@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db_session, session_factory
 from ..db_models import ConversationEntity, MessageEntity, utc_now
-from ..models import ChatMode, MessageStatus
+from ..models import ChatMode, ConversationImportRequest, MessageStatus
 
 CONVERSATION_TITLE_MAX_LENGTH = 120
 ELLIPSIS = "..."
@@ -26,6 +26,14 @@ class ConversationNotFoundError(Exception):
 
 class ConversationBusyError(Exception):
     """Only one generation may run in one conversation at a time."""
+
+
+class ImportConflictError(Exception):
+    """The import identifier was already used with different content."""
+
+
+class ImportDeletedError(Exception):
+    """The original import was deleted and must never be recreated."""
 
 
 class DuplicateMessageRequestError(Exception):
@@ -44,6 +52,10 @@ class PreparedGeneration:
 
 
 class ConversationRepository(Protocol):
+    async def import_conversation(
+        self, *, user_id: UUID, request: ConversationImportRequest, fingerprint: str
+    ) -> ConversationEntity: ...
+
     async def create_conversation(
         self, *, user_id: UUID, mode: ChatMode, topic: str | None
     ) -> ConversationEntity: ...
@@ -106,6 +118,83 @@ class ConversationRepository(Protocol):
 class SQLAlchemyConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def _find_import(
+        self, user_id: UUID, request_id: str, fingerprint: str
+    ) -> ConversationEntity | None:
+        result = await self.session.execute(
+            select(ConversationEntity).where(
+                ConversationEntity.user_id == user_id,
+                ConversationEntity.import_request_id == request_id,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            if existing.deleted_at is not None:
+                raise ImportDeletedError
+            if existing.import_fingerprint != fingerprint:
+                raise ImportConflictError
+        return existing
+
+    async def import_conversation(
+        self, *, user_id: UUID, request: ConversationImportRequest, fingerprint: str
+    ) -> ConversationEntity:
+        existing = await self._find_import(
+            user_id, request.import_request_id, fingerprint
+        )
+        if existing:
+            return existing
+        now = utc_now()
+        first_user = next(
+            m.content.strip() for m in request.messages if m.role == "user"
+        )
+        content_limit = CONVERSATION_TITLE_MAX_LENGTH - len(ELLIPSIS)
+        conversation = ConversationEntity(
+            id=uuid4(),
+            user_id=user_id,
+            mode="chat",
+            topic=request.topic,
+            title=first_user[:content_limit]
+            + (ELLIPSIS if len(first_user) > content_limit else ""),
+            import_request_id=request.import_request_id,
+            import_fingerprint=fingerprint,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            self.session.add(conversation)
+            # Flush the parent first, without committing any partial history.
+            await self.session.flush()
+            self.session.add_all(
+                [
+                    MessageEntity(
+                        conversation_id=conversation.id,
+                        sequence_no=index,
+                        role=message.role,
+                        content=message.content,
+                        source="client_import",
+                        status="complete",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    for index, message in enumerate(request.messages, start=1)
+                ]
+            )
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            # The unique constraint waits for a competing transaction to finish.
+            # Read its committed result in a fresh transaction after rollback.
+            existing = await self._find_import(
+                user_id, request.import_request_id, fingerprint
+            )
+            if existing:
+                return existing
+            raise
+        except BaseException:
+            await self.session.rollback()
+            raise
+        return conversation
 
     async def create_conversation(
         self, *, user_id: UUID, mode: ChatMode, topic: str | None

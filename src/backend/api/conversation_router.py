@@ -12,6 +12,7 @@ from ..models import (
     CloudChatStreamDelta,
     CloudChatStreamStart,
     ConversationCreateRequest,
+    ConversationImportRequest,
     ConversationPage,
     ConversationResponse,
     ConversationUpdateRequest,
@@ -64,6 +65,18 @@ async def list_conversations(
             cursor=cursor,
             include_archived=include_archived,
         )
+    except ConversationServiceError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/import", response_model=ConversationResponse)
+async def import_conversation(
+    request: ConversationImportRequest,
+    current: CurrentSession = Depends(require_csrf),
+    service: ConversationService = Depends(get_conversation_service),
+) -> ConversationResponse:
+    try:
+        return await service.import_history(current.user.id, request)
     except ConversationServiceError as error:
         raise _http_error(error) from error
 

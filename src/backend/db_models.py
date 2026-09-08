@@ -74,6 +74,9 @@ class ConversationEntity(Base):
     __tablename__ = "conversations"
     __table_args__ = (
         Index("ix_conversations_owner_updated", "user_id", "updated_at", "id"),
+        UniqueConstraint(
+            "user_id", "import_request_id", name="uq_conversations_owner_import"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -88,6 +91,8 @@ class ConversationEntity(Base):
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default="chat")
     topic: Mapped[str | None] = mapped_column(String(200))
     title: Mapped[str] = mapped_column(String(120), nullable=False, default="新对话")
+    import_request_id: Mapped[str | None] = mapped_column(String(64))
+    import_fingerprint: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

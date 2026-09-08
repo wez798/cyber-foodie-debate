@@ -188,6 +188,7 @@ cyber-foodie-debate/
 | POST | `/api/v1/auth/logout`         | 撤销当前会话 |
 | GET  | `/api/v1/auth/me`             | 获取当前用户 |
 | GET/POST | `/api/v1/conversations` | 分页查询/创建云端会话 |
+| POST | `/api/v1/conversations/import` | 用户确认后幂等导入游客完整问答 |
 | GET/PATCH/DELETE | `/api/v1/conversations/{id}` | 查询、更新或软删除会话 |
 | GET  | `/api/v1/conversations/{id}/messages` | 分页查询持久化消息 |
 | POST | `/api/v1/conversations/{id}/messages/stream` | 持久化 POST SSE 对话 |
@@ -233,6 +234,21 @@ cyber-foodie-debate/
 只持有 HttpOnly 不透明会话 Cookie 和可读的 CSRF Cookie，数据库仅保存令牌哈希。
 
 ## 技术栈
+
+### 本地历史导入 API
+
+`POST /api/v1/conversations/import` 使用登录 Cookie、允许的 Origin 和 CSRF 保护，
+返回 `200 ConversationResponse`。请求仅接受 `import_request_id`（1–64 字符，
+`[A-Za-z0-9][A-Za-z0-9._:-]*`）、可空 `topic`（去除首尾空白后最多 200 字符）和
+`messages`（1–50 条，仅 `role` 与 `content`）。消息只能为 user/assistant，必须有
+user，可结束于 assistant；每条正文 1–8000 字符且不能纯空白，正文原样保存，
+正文与规范化 topic 合计最多 64000 Unicode 字符。未知字段返回 422。
+
+同一用户相同 ID 和内容返回原会话；不同内容返回 `409 import_conflict`，
+原会话软删除后返回 `409 import_deleted`，不恢复或重复创建。不同用户的 ID 独立。
+导入为 chat，消息标记 `client_import/complete`，按请求顺序编号；全过程不调用 LLM/TTS。
+部署前在目标开发数据库执行 `alembic upgrade head`；新迁移为 `20260908_0002`，
+随后执行 `alembic check`。本阶段不含 OAuth、邮件验证、密码找回或辩论持久化。
 
 - **LLM**: 硅基流动 `deepseek-ai/DeepSeek-V4-Flash`
 - **后端**: Python 3.11 / FastAPI / Pydantic v2

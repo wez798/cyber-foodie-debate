@@ -68,6 +68,42 @@ const streamErrorSchema = z.object({
 })
 
 export type CloudConversation = z.infer<typeof conversationSchema>
+const characterCount = (value: string) => Array.from(value).length
+
+export const importHistorySchema = z.object({
+  import_request_id: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  topic: z.string().nullable().transform((value) => value?.trim() || null)
+    .refine((value) => characterCount(value ?? "") <= 200, "话题不能超过 200 字符"),
+  messages: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    content: z.string().refine((value) => value.trim().length > 0 && characterCount(value) <= 8000,
+      "单条消息需包含 1–8000 字符且不能为纯空白"),
+  }).strict()).min(1, "没有可导入的消息").max(50, "最多导入 50 条消息"),
+}).strict().superRefine((value, context) => {
+  if (!value.messages.some((message) => message.role === "user")) {
+    context.addIssue({ code: "custom", message: "历史必须包含用户消息" })
+  }
+  if (characterCount(value.topic ?? "") + value.messages.reduce((sum, message) => sum + characterCount(message.content), 0) > 64000) {
+    context.addIssue({ code: "custom", message: "话题与消息合计不能超过 64000 字符" })
+  }
+})
+
+export type ImportHistoryRequest = z.infer<typeof importHistorySchema>
+
+export async function importCloudConversation(
+  request: ImportHistoryRequest,
+  signal?: AbortSignal,
+): Promise<CloudConversation> {
+  const response = await apiFetch("/conversations/import", {
+    method: "POST",
+    body: JSON.stringify(importHistorySchema.parse(request)),
+    signal,
+  })
+  const conversation = conversationSchema.parse(await response.json())
+  if (conversation.mode !== "chat") throw new Error("导入响应的会话模式无效")
+  return conversation
+}
+
 export type CloudMessage = z.infer<typeof messageSchema>
 export type CloudConversationPage = z.infer<typeof conversationPageSchema>
 export type CloudMessagePage = z.infer<typeof messagePageSchema>

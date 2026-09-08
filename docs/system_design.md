@@ -291,6 +291,25 @@ stateDiagram-v2
 
 ## 四、开发与部署边界
 
+### 用户确认导入的事务与幂等
+
+`POST /api/v1/conversations/import` 沿 API → Service → Repository → Database 调用；
+Router 复用登录、Origin、CSRF 依赖。请求模型在 `models.py`，限制见 README。
+Service 对规范化 topic 和有序 messages 的确定性 JSON（键排序、无额外空格、UTF-8）
+计算 SHA-256，不含客户端请求 ID、服务端 ID 或时间。仅 topic 去首尾空白、空值转 null，
+正文保留原始内容。
+
+选择在 conversations 增加可空 `import_request_id`、`import_fingerprint`，以最小表结构
+复用既有软删除生命周期；唯一约束 `uq_conversations_owner_import(user_id, import_request_id)`
+保证并发最多一份。历史会话两个字段均为 null。新增迁移 `20260908_0002`，不修改旧迁移。
+Repository 同事务创建会话和全部消息，先 flush 父记录再批量写消息，失败整体 rollback；
+唯一冲突回滚后按用户及导入 ID 读取胜出事务结果。指纹只在初始导入写入，改名或追加不改它。
+相同内容重放返回原会话；不同内容 `409 import_conflict`；软删除 `409 import_deleted`。
+
+会话固定 chat、标题确定性截取首条 user 正文；消息编号从 1 连续递增，source 为
+client_import、status 为 complete，时间为服务端带时区 UTC。导入无需配置或调用外部服务。
+导入的两种角色仍是不可信历史；后续生成只由服务端模板创建 system 指令。
+
 - Vite 开发服务器默认监听 `127.0.0.1:5173`。
 - FastAPI 默认监听 `0.0.0.0:8000`，Swagger UI 位于 `/docs`。
 - 辩论、认证和云端会话 API 默认前缀为 `/api/v1`，游客聊天 API 默认前缀为 `/api`。

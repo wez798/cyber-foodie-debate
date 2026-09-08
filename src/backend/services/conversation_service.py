@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -24,6 +25,7 @@ from ..models import (
     CloudChatStreamDone,
     CloudChatStreamError,
     ConversationCreateRequest,
+    ConversationImportRequest,
     ConversationPage,
     ConversationResponse,
     ConversationUpdateRequest,
@@ -36,6 +38,8 @@ from ..repositories.conversation_repository import (
     ConversationNotFoundError,
     ConversationRepository,
     DuplicateMessageRequestError,
+    ImportConflictError,
+    ImportDeletedError,
     PreparedGeneration,
     conversation_repository_context,
     get_conversation_repository,
@@ -152,6 +156,30 @@ class ConversationService:
         entity = await self.repository.create_conversation(
             user_id=user_id, mode=request.mode, topic=request.topic
         )
+        return conversation_response(entity)
+
+    async def import_history(
+        self, user_id: UUID, request: ConversationImportRequest
+    ) -> ConversationResponse:
+        canonical = json.dumps(
+            request.model_dump(exclude={"import_request_id"}),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        try:
+            entity = await self.repository.import_conversation(
+                user_id=user_id, request=request, fingerprint=fingerprint
+            )
+        except ImportConflictError as error:
+            raise ConversationServiceError(
+                "import_conflict", "该导入标识已用于其他内容", status_code=409
+            ) from error
+        except ImportDeletedError as error:
+            raise ConversationServiceError(
+                "import_deleted", "原导入会话已删除，不能重新导入", status_code=409
+            ) from error
         return conversation_response(entity)
 
     async def get(self, user_id: UUID, conversation_id: UUID) -> ConversationResponse:

@@ -128,6 +128,7 @@ ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src --ignore-missing-imports
 pytest tests/unit -v
+pytest tests/integration -v
 behave tests/bdd
 
 # src/frontend
@@ -141,6 +142,20 @@ BDD 和连通性测试必须隔离或显式标记真实外部服务调用，默�
 连通失败时脚本会返回非零退出码。
 
 ## 代码审查清单
+
+导入接口修改需验证未知字段、字符及数量限制、用户隔离、CSRF、原子回滚、并发幂等、
+改名/追加后的重放及软删除后的安全拒绝。`test_import_migrations.py` 自动在临时 SQLite
+文件验证空库升级、第一阶段 schema 带数据升级及 `alembic check`；不访问 `.env` 数据库。
+PostgreSQL 集成验收需将 `TEST_DATABASE_URL` 指向可销毁的专用测试库（测试会建表/清表），
+不能使用开发或生产数据。SQLite 并发测试不能替代 PostgreSQL 验收。
+手动迁移验收同样仅在一次性数据库设置 `DATABASE_URL` 后执行：
+
+```bash
+alembic upgrade head
+alembic check
+```
+
+邮件验证、密码找回和辩论持久化尚未实现，测试与文档不得宣称支持。
 
 提交 PR 前请确认：
 - [ ] 代码遵循 Angular Commit 规范

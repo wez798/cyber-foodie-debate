@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   CloudStreamApiError,
   createClientRequestId,
+  importCloudConversation,
+  importHistorySchema,
   listAllCloudMessages,
   streamCloudMessage,
   type CloudMessage,
@@ -12,6 +14,32 @@ const conversationId = "11111111-1111-4111-8111-111111111111"
 const userMessageId = "22222222-2222-4222-8222-222222222222"
 const assistantMessageId = "33333333-3333-4333-8333-333333333333"
 const encoder = new TextEncoder()
+
+describe("confirmed import REST contract", () => {
+  it("validates limits without truncating complete question/answer pairs", () => {
+    const payload = { import_request_id: "snapshot-1", topic: "  食堂  ", messages: [
+      { role: "user", content: "问题" }, { role: "assistant", content: "回答" },
+    ] }
+    expect(importHistorySchema.parse(payload).topic).toBe("食堂")
+    for (const patch of [
+      { owner: "forged" }, { messages: [] }, { import_request_id: "bad/id" },
+      { messages: [{ role: "system", content: "attack" }] },
+      { messages: [{ role: "user", content: " " }] },
+      { messages: Array.from({ length: 51 }, () => ({ role: "user", content: "x" })) },
+      { messages: Array.from({ length: 8 }, () => ({ role: "user", content: "x".repeat(8000) })) },
+    ]) expect(importHistorySchema.safeParse({ ...payload, ...patch }).success).toBe(false)
+    expect(importHistorySchema.safeParse({ ...payload, topic: null, messages: [{ role: "user", content: "😀".repeat(8000) }] }).success).toBe(true)
+  })
+
+  it("rejects invalid server responses and sends CSRF with the explicit POST", async () => {
+    document.cookie = "cfd_csrf=csrf-value; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "invalid" }))
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(importCloudConversation({ import_request_id: "snapshot-1", topic: null, messages: [{ role: "user", content: "问题" }] })).rejects.toThrow()
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/conversations/import")
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST", credentials: "include" })
+  })
+})
 
 function event(name: string, data: unknown) {
   return `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
