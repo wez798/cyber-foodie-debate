@@ -293,6 +293,14 @@ stateDiagram-v2
 
 ### 用户确认导入的事务与幂等
 
+前端 `LocalChatImport` 按 user ID 挂载并隔离状态。点击时捕获完整快照，使用
+SHA-256(user ID + 本地会话 ID/模式/话题/更新时间/有序消息) 作为请求 ID；相同快照刷新后稳定，
+不同用户及修订互不串用，不在浏览器新增认证数据。预览为纯文本且不发出正文网络请求。
+POST 后校验 REST 响应并读取有界消息页核对原导入内容，才打开云端、刷新列表、尝试清理。
+若原导入内容已不在最近页，保留副本并显示无法核对，避免自动追逐全部历史。
+清理与游客存储写入共享 Web Locks，锁内比较完整快照再移除，变化或不支持锁时保留。
+storage/custom event 同步当前游客内存；卸载及用户切换 abort，所有异步阶段检查取消信号。
+
 `POST /api/v1/conversations/import` 沿 API → Service → Repository → Database 调用；
 Router 复用登录、Origin、CSRF 依赖。请求模型在 `models.py`，限制见 README。
 Service 对规范化 topic 和有序 messages 的确定性 JSON（键排序、无额外空格、UTF-8）

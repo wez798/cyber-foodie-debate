@@ -5,6 +5,44 @@ import type {
 } from "@/types/chat"
 
 export const CHAT_STORAGE_KEY = "cyber-foodie-debate:recent-chat"
+export const CHAT_STORAGE_EVENT = "cyber-foodie-debate:recent-chat-changed"
+const CHAT_STORAGE_LOCK = "cyber-foodie-debate:recent-chat-lock"
+
+async function storageWrite(action: () => void) {
+  if (navigator.locks) await navigator.locks.request(CHAT_STORAGE_LOCK, action)
+  else action()
+  window.dispatchEvent(new Event(CHAT_STORAGE_EVENT))
+}
+
+export function serializeConversation(conversation: ChatConversation): string {
+  return JSON.stringify({
+    conversation_id: conversation.conversation_id,
+    mode: conversation.mode,
+    topic: conversation.topic,
+    updated_at: conversation.updated_at,
+    messages: conversation.messages.map(({ role, content }) => ({ role, content })),
+  })
+}
+
+export async function clearImportedConversation(
+  snapshot: ChatConversation,
+  signal: AbortSignal,
+): Promise<boolean> {
+  // localStorage has no compare-and-swap; preserve the copy without cross-tab locks.
+  if (!navigator.locks) return false
+  return navigator.locks.request(CHAT_STORAGE_LOCK, { signal }, () => {
+    if (signal.aborted) return false
+    const current = loadRecentConversation()
+    if (!current || serializeConversation(current) !== serializeConversation(snapshot)) return false
+    try {
+      window.localStorage.removeItem(CHAT_STORAGE_KEY)
+      window.dispatchEvent(new Event(CHAT_STORAGE_EVENT))
+      return true
+    } catch {
+      return false
+    }
+  })
+}
 
 const CHAT_MODES: ChatMode[] = [
   "chat",
@@ -59,20 +97,20 @@ export function loadRecentConversation(): ChatConversation | null {
   }
 }
 
-export function saveRecentConversation(conversation: ChatConversation) {
+export async function saveRecentConversation(conversation: ChatConversation) {
   try {
-    window.localStorage.setItem(
+    await storageWrite(() => window.localStorage.setItem(
       CHAT_STORAGE_KEY,
       JSON.stringify(conversation),
-    )
+    ))
   } catch {
     // Storage can be unavailable in private browsing or when the quota is full.
   }
 }
 
-export function clearRecentConversation() {
+export async function clearRecentConversation() {
   try {
-    window.localStorage.removeItem(CHAT_STORAGE_KEY)
+    await storageWrite(() => window.localStorage.removeItem(CHAT_STORAGE_KEY))
   } catch {
     // Keep the in-memory reset usable even if browser storage is unavailable.
   }

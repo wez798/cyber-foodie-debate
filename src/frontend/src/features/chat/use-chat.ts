@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { streamChat } from "@/features/chat/chat-api"
 import {
   clearRecentConversation,
+  CHAT_STORAGE_EVENT,
+  CHAT_STORAGE_KEY,
   loadRecentConversation,
   saveRecentConversation,
 } from "@/features/chat/chat-storage"
@@ -28,7 +30,7 @@ function withPendingAssistant(
   return [...messages, { role: "assistant", content }]
 }
 
-export function useChat() {
+export function useChat(enabled = true) {
   const [state, setState] = useState<ChatViewState>(initialState)
   const [draft, setDraft] = useState("")
   const controllerRef = useRef<AbortController | null>(null)
@@ -39,7 +41,7 @@ export function useChat() {
 
   const send = useCallback(async () => {
     const content = draft.trim()
-    if (!content || state.phase === "streaming") return false
+    if (!enabled || !content || state.phase === "streaming") return false
 
     const controller = new AbortController()
     controllerRef.current?.abort()
@@ -69,6 +71,7 @@ export function useChat() {
       const done = await streamChat(request, {
         signal: controller.signal,
         onEvent: (event) => {
+          if (controller.signal.aborted) return
           if (event.event === "start") {
             conversationId = event.data.conversation_id
             setState((current) => ({
@@ -93,6 +96,8 @@ export function useChat() {
         },
       })
 
+      if (controller.signal.aborted) return false
+
       const completedMessages = [...outgoingMessages, done.message]
       const updatedAt = new Date().toISOString()
       const resolvedId = conversationId ?? done.conversation_id
@@ -104,7 +109,7 @@ export function useChat() {
         phase: "idle",
         error: null,
       }))
-      saveRecentConversation({
+      await saveRecentConversation({
         conversation_id: resolvedId,
         messages: completedMessages,
         mode: "chat",
@@ -134,7 +139,7 @@ export function useChat() {
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null
     }
-  }, [draft, state])
+  }, [draft, state, enabled])
 
   const stop = useCallback(() => {
     controllerRef.current?.abort()
@@ -143,7 +148,7 @@ export function useChat() {
   const reset = useCallback(() => {
     controllerRef.current?.abort()
     controllerRef.current = null
-    clearRecentConversation()
+    void clearRecentConversation()
     setDraft("")
     setState({
       conversationId: null,
@@ -157,6 +162,26 @@ export function useChat() {
   }, [])
 
   useEffect(() => () => controllerRef.current?.abort(), [])
+
+  useEffect(() => {
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    setState(initialState())
+    setDraft("")
+  }, [enabled])
+
+  useEffect(() => {
+    const sync = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== CHAT_STORAGE_KEY && event.key !== null) return
+      if (!controllerRef.current) setState(initialState())
+    }
+    window.addEventListener("storage", sync)
+    window.addEventListener(CHAT_STORAGE_EVENT, sync)
+    return () => {
+      window.removeEventListener("storage", sync)
+      window.removeEventListener(CHAT_STORAGE_EVENT, sync)
+    }
+  }, [])
 
   return {
     state,

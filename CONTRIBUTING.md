@@ -148,6 +148,8 @@ BDD 和连通性测试必须隔离或显式标记真实外部服务调用，默�
 文件验证空库升级、第一阶段 schema 带数据升级及 `alembic check`；不访问 `.env` 数据库。
 PostgreSQL 集成验收需将 `TEST_DATABASE_URL` 指向可销毁的专用测试库（测试会建表/清表），
 不能使用开发或生产数据。SQLite 并发测试不能替代 PostgreSQL 验收。
+前端导入测试需覆盖未确认不上传、刷新重试 ID、账号隔离、迟到响应、取消/读取失败、
+跨标签页本地内容变化及清理后的游客内存同步。测试使用 fake REST 与 Web Locks，禁止真实 LLM/TTS。
 手动迁移验收同样仅在一次性数据库设置 `DATABASE_URL` 后执行：
 
 ```bash

@@ -233,9 +233,20 @@ cyber-foodie-debate/
 消息写入 PostgreSQL，并沿 `next_cursor` 自动拉取全部历史页。密码使用 Argon2id；浏览器
 只持有 HttpOnly 不透明会话 Cookie 和可读的 CSRF Cookie，数据库仅保存令牌哈希。
 
-## 技术栈
+## 本地历史导入
 
-### 本地历史导入 API
+登录后，本地历史旁会显示消息数量、纯文本摘要和“保存当前本地会话”。只有主动点击才会上传，
+超出限制会说明原因，不截断。可“暂不保存”继续云端聊天，也可取消正在进行的保存。
+导入 ID 由当前用户与完整本地快照的 SHA-256 确定，网络失败或刷新后未变化的快照复用同一 ID，
+无需另存认证信息。需要 HTTPS 或 localhost 的 Web Crypto 支持。
+
+成功响应经运行时校验，再读取云端会话与有界消息页，核对导入的角色、正文、顺序、来源和状态，
+打开云端会话并刷新列表。全部确认后，仅在本地快照仍相同时清理副本；清理同步更新游客内存。
+所有本地写入与清理共用 Web Locks 跨标签页锁；浏览器不支持锁、内容已变化、读取失败或取消，
+均保留本地数据。旧导入会话若已追加大量消息、最近页不能核对全部原消息，也保留副本并说明原因。
+账号切换、登出或卸载会取消请求，旧响应不会导航或清理。密码和认证 Token 不存 localStorage。
+
+### API 契约
 
 `POST /api/v1/conversations/import` 使用登录 Cookie、允许的 Origin 和 CSRF 保护，
 返回 `200 ConversationResponse`。请求仅接受 `import_request_id`（1–64 字符，
@@ -249,6 +260,8 @@ user，可结束于 assistant；每条正文 1–8000 字符且不能纯空白�
 导入为 chat，消息标记 `client_import/complete`，按请求顺序编号；全过程不调用 LLM/TTS。
 部署前在目标开发数据库执行 `alembic upgrade head`；新迁移为 `20260908_0002`，
 随后执行 `alembic check`。本阶段不含 OAuth、邮件验证、密码找回或辩论持久化。
+
+## 技术栈
 
 - **LLM**: 硅基流动 `deepseek-ai/DeepSeek-V4-Flash`
 - **后端**: Python 3.11 / FastAPI / Pydantic v2

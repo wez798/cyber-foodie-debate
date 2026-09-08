@@ -7,6 +7,8 @@ import {
   getCloudConversation,
   listAllCloudMessages,
   streamCloudMessage,
+  type CloudConversation,
+  type CloudMessage,
 } from "@/features/chat/cloud-chat-api"
 import { ApiError } from "@/lib/api-client"
 import type { ChatMessage, ChatViewState } from "@/types/chat"
@@ -32,6 +34,7 @@ function pendingAssistant(
 
 interface CloudChatOptions {
   enabled: boolean
+  userId?: string
   routeConversationId: string | null
   onConversationResolved: (conversationId: string) => void
   onHistoryChanged: () => void
@@ -40,6 +43,7 @@ interface CloudChatOptions {
 
 export function useCloudChat({
   enabled,
+  userId,
   routeConversationId,
   onConversationResolved,
   onHistoryChanged,
@@ -112,7 +116,23 @@ export function useCloudChat({
         }
       })
     return () => controller.abort()
-  }, [enabled, routeConversationId, onUnauthorized])
+  }, [enabled, userId, routeConversationId, onUnauthorized])
+
+  const openImported = useCallback((conversation: CloudConversation, messages: CloudMessage[]) => {
+    streamControllerRef.current?.abort()
+    streamControllerRef.current = null
+    loadControllerRef.current?.abort()
+    loadControllerRef.current = null
+    locallyResolvedRouteRef.current = conversation.id
+    setDraft("")
+    setState({
+      conversationId: conversation.id, mode: "chat", topic: conversation.topic ?? "",
+      updatedAt: conversation.updated_at, phase: "idle", error: null,
+      messages: messages.filter((message) => message.role === "user" || message.status === "complete")
+        .map(({ role, content }) => ({ role, content })),
+    })
+    onConversationResolved(conversation.id)
+  }, [onConversationResolved])
 
   const setTopic = useCallback((topic: string) => {
     setState((current) => ({ ...current, topic }))
@@ -164,6 +184,7 @@ export function useCloudChat({
         {
           signal: controller.signal,
           onEvent: (event) => {
+            if (controller.signal.aborted) return
             if (event.event === "start" && !historyAnnounced) {
               historyAnnounced = true
               onHistoryChanged()
@@ -184,6 +205,8 @@ export function useCloudChat({
           },
         },
       )
+
+      if (controller.signal.aborted) return false
 
       setState((current) => ({
         ...current,
@@ -259,5 +282,5 @@ export function useCloudChat({
     [],
   )
 
-  return { state, draft, setDraft, setTopic, send, stop, reset }
+  return { state, draft, setDraft, setTopic, send, stop, reset, openImported }
 }

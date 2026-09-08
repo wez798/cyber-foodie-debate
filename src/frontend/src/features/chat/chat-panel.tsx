@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/features/auth/auth-context"
 import { ConversationHistory } from "@/features/chat/conversation-history"
+import { LocalChatImport } from "@/features/chat/local-chat-import"
 import { useChat } from "@/features/chat/use-chat"
 import { useCloudChat } from "@/features/chat/use-cloud-chat"
 
@@ -34,7 +35,7 @@ export function ChatPanel() {
   const navigate = useNavigate()
   const { user, loading, refresh } = useAuth()
   const [historyVersion, setHistoryVersion] = useState(0)
-  const guestChat = useChat()
+  const guestChat = useChat(!user && !loading)
 
   const handleHistoryChanged = useCallback(() => {
     setHistoryVersion((version) => version + 1)
@@ -50,6 +51,7 @@ export function ChatPanel() {
   }, [refresh])
   const cloudChat = useCloudChat({
     enabled: Boolean(user),
+    userId: user?.id,
     routeConversationId: routeConversationId ?? null,
     onConversationResolved: handleConversationResolved,
     onHistoryChanged: handleHistoryChanged,
@@ -126,8 +128,11 @@ export function ChatPanel() {
 
       <CardContent className="grid gap-0 px-0 lg:grid-cols-[260px_minmax(0,1fr)]">
         <div className="space-y-4 border-b bg-muted/25 p-5 lg:border-r lg:border-b-0">
+          {user && <LocalChatImport key={user.id} userId={user.id}
+            onOpen={cloudChat.openImported} onHistoryChanged={handleHistoryChanged} />}
           {user ? (
             <ConversationHistory
+              key={user.id}
               activeId={state.conversationId}
               refreshVersion={historyVersion}
               onSelect={(conversationId) => navigate(`/chat/${conversationId}`)}
