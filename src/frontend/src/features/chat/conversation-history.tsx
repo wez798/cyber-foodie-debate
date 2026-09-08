@@ -32,6 +32,7 @@ export function ConversationHistory({
 
   useEffect(() => {
     const controller = new AbortController()
+    setLoadingMore(false)
     void listCloudConversations(controller.signal)
       .then((page) => {
         if (!controller.signal.aborted) {

@@ -5,7 +5,9 @@ import {
   createClientRequestId,
   importCloudConversation,
   importHistorySchema,
-  listAllCloudMessages,
+  listCloudMessages,
+  mergeCloudMessages,
+  validateMessagePage,
   streamCloudMessage,
   type CloudMessage,
 } from "@/features/chat/cloud-chat-api"
@@ -246,7 +248,7 @@ describe("streamCloudMessage", () => {
 })
 
 describe("cloud message history", () => {
-  it("loads every cursor page and restores chronological order", async () => {
+  it("requests only one bounded page and follows a cursor only when called", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -263,19 +265,33 @@ describe("cloud message history", () => {
       )
     vi.stubGlobal("fetch", fetchMock)
 
-    await expect(
-      listAllCloudMessages(conversationId, new AbortController().signal),
-    ).resolves.toEqual([
-      cloudMessage(1),
-      cloudMessage(2),
-      cloudMessage(101),
-      cloudMessage(102),
-    ])
+    const first = await listCloudMessages(conversationId, new AbortController().signal)
+    expect(first.items).toEqual([cloudMessage(101), cloudMessage(102)])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const second = await listCloudMessages(conversationId, undefined, first.next_cursor)
+    expect(mergeCloudMessages(first.items, second.items).map((item) => item.sequence_no)).toEqual([1, 2, 101, 102])
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("messages?limit=100")
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("messages?limit=50")
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
-      "messages?limit=100&cursor=older-page",
+      "messages?limit=50&cursor=older-page",
     )
+  })
+
+  it.each([
+    { items: [], next_cursor: "again" },
+    { items: [cloudMessage(1)], next_cursor: "" },
+    { items: [cloudMessage(1)], next_cursor: "current" },
+    { items: [{ ...cloudMessage(1), conversation_id: userMessageId }], next_cursor: null },
+    { items: [{ ...cloudMessage(1), sequence_no: 0 }], next_cursor: null },
+    { items: [cloudMessage(1), { ...cloudMessage(1), id: userMessageId }], next_cursor: null },
+    { items: Array.from({ length: 51 }, (_, index) => cloudMessage(index + 1)), next_cursor: null },
+  ])("rejects invalid pagination data", (page) => {
+    expect(() => validateMessagePage(page, conversationId, "current")).toThrow()
+  })
+
+  it("deduplicates by stable ID, sorts and rejects cursor cycles", () => {
+    expect(validateMessagePage({ items: [cloudMessage(2), cloudMessage(1), cloudMessage(2)], next_cursor: null }, conversationId, null).items).toEqual([cloudMessage(1), cloudMessage(2)])
+    expect(() => validateMessagePage({ items: [cloudMessage(1)], next_cursor: "seen" }, conversationId, "current", new Set(["seen"]))).toThrow("游标重复")
   })
 
   it("creates a backend-compatible idempotency key", () => {

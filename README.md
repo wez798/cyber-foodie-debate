@@ -230,7 +230,8 @@ cyber-foodie-debate/
 
 游客聊天历史只保存在浏览器 localStorage，键为
 `cyber-foodie-debate:recent-chat`。登录后，前端改用受认证与 CSRF 保护的云端接口，
-消息写入 PostgreSQL，并沿 `next_cursor` 自动拉取全部历史页。密码使用 Argon2id；浏览器
+消息写入 PostgreSQL，打开会话时仅加载最近 50 条消息；点击顶部“加载更早消息”才请求上一页。
+失败保留已显示内容，可重试当前页，会话列表继续支持“加载更多”。密码使用 Argon2id；浏览器
 只持有 HttpOnly 不透明会话 Cookie 和可读的 CSRF Cookie，数据库仅保存令牌哈希。
 
 ## 本地历史导入

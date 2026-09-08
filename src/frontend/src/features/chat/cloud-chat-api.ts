@@ -35,8 +35,8 @@ const conversationPageSchema = z.object({
 })
 
 const messagePageSchema = z.object({
-  items: z.array(messageSchema),
-  next_cursor: z.string().nullable(),
+  items: z.array(messageSchema).max(50),
+  next_cursor: z.string().min(1).max(512).nullable(),
 })
 
 const streamStartSchema = z.object({
@@ -157,7 +157,9 @@ export async function getCloudConversation(
   signal?: AbortSignal,
 ): Promise<CloudConversation> {
   const response = await apiFetch(`/conversations/${conversationId}`, { signal })
-  return conversationSchema.parse(await response.json())
+  const conversation = conversationSchema.parse(await response.json())
+  if (conversation.id !== conversationId) throw new Error("云端会话 ID 不匹配")
+  return conversation
 }
 
 export async function listCloudMessages(
@@ -165,36 +167,45 @@ export async function listCloudMessages(
   signal?: AbortSignal,
   cursor?: string | null,
 ): Promise<CloudMessagePage> {
-  const query = new URLSearchParams({ limit: "100" })
+  const query = new URLSearchParams({ limit: "50" })
   if (cursor) query.set("cursor", cursor)
   const response = await apiFetch(
     `/conversations/${conversationId}/messages?${query.toString()}`,
     { signal },
   )
-  return messagePageSchema.parse(await response.json())
+  return validateMessagePage(await response.json(), conversationId, cursor ?? null)
 }
 
-export async function listAllCloudMessages(
-  conversationId: string,
-  signal?: AbortSignal,
-): Promise<CloudMessage[]> {
-  const pages: CloudMessage[][] = []
-  const seenCursors = new Set<string>()
-  let cursor: string | null = null
+export function validateMessagePage(
+  value: unknown, conversationId: string, cursor: string | null,
+  seenCursors: ReadonlySet<string> = new Set(),
+): CloudMessagePage {
+  const parsed = messagePageSchema.safeParse(value)
+  if (!parsed.success) throw new Error("云端消息分页响应无效")
+  const page = parsed.data
+  if (page.next_cursor && (page.next_cursor === cursor || seenCursors.has(page.next_cursor))) {
+    throw new Error("云端消息分页游标重复，请重试当前页")
+  }
+  if ((page.next_cursor && page.items.length === 0) || page.items.some((item) => item.conversation_id !== conversationId)) {
+    throw new Error("云端消息分页响应无效")
+  }
+  return { ...page, items: mergeCloudMessages([], page.items) }
+}
 
-  do {
-    const page = await listCloudMessages(conversationId, signal, cursor)
-    pages.push(page.items)
-    cursor = page.next_cursor
-    if (cursor) {
-      if (seenCursors.has(cursor)) {
-        throw new Error("云端消息分页游标重复，无法完整恢复会话")
-      }
-      seenCursors.add(cursor)
+export function mergeCloudMessages(current: CloudMessage[], incoming: CloudMessage[]): CloudMessage[] {
+  const merged = new Map<string, CloudMessage>()
+  const sequences = new Map<number, string>()
+  for (const message of [...current, ...incoming]) {
+    const existing = merged.get(message.id)
+    if ((existing && (existing.sequence_no !== message.sequence_no || existing.role !== message.role || existing.conversation_id !== message.conversation_id)) ||
+      (sequences.has(message.sequence_no) && sequences.get(message.sequence_no) !== message.id)) {
+      throw new Error("云端消息 ID 或顺序不一致")
     }
-  } while (cursor)
-
-  return pages.reverse().flat()
+    // Existing complete content wins over an older history response.
+    if (!existing || (existing.status === "generating" && message.status !== "generating")) merged.set(message.id, message)
+    sequences.set(message.sequence_no, message.id)
+  }
+  return [...merged.values()].sort((left, right) => left.sequence_no - right.sequence_no)
 }
 
 export function createClientRequestId(): string {
