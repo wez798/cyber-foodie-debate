@@ -6,6 +6,7 @@ import {
   validateMessagePage, type CloudConversation, type CloudMessage,
 } from "@/features/chat/cloud-chat-api"
 import { ApiError } from "@/lib/api-client"
+import { AUTH_CHANGE_EVENT } from "@/features/auth/auth-sync"
 import type { ChatViewState } from "@/types/chat"
 
 function blankState(): ChatViewState {
@@ -112,6 +113,11 @@ export function useCloudChat({ enabled, userId, routeConversationId, onConversat
   }, [enabled, userId, routeConversationId, reloadVersion, onUnauthorized, advanceCursor, cancelRequests, clearView, replaceMessages])
 
   useEffect(() => cancelRequests, [cancelRequests])
+  useEffect(() => {
+    const changed = () => { cancelRequests(); clearView() }
+    window.addEventListener(AUTH_CHANGE_EVENT, changed)
+    return () => window.removeEventListener(AUTH_CHANGE_EVENT, changed)
+  }, [cancelRequests, clearView])
 
   const openImported = useCallback((conversation: CloudConversation, items: CloudMessage[], cursor: string | null) => {
     cancelRequests()

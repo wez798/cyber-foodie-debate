@@ -89,19 +89,36 @@ export const importHistorySchema = z.object({
 })
 
 export type ImportHistoryRequest = z.infer<typeof importHistorySchema>
+export type ConfirmedImportRequest = ImportHistoryRequest & { expected_user_id: string }
+const confirmedImportSchema = importHistorySchema.safeExtend({ expected_user_id: z.string().uuid() })
 
 export async function importCloudConversation(
-  request: ImportHistoryRequest,
+  request: ConfirmedImportRequest,
   signal?: AbortSignal,
 ): Promise<CloudConversation> {
   const response = await apiFetch("/conversations/import", {
     method: "POST",
-    body: JSON.stringify(importHistorySchema.parse(request)),
+    body: JSON.stringify(confirmedImportSchema.parse(request)),
     signal,
   })
   const conversation = conversationSchema.parse(await response.json())
   if (conversation.mode !== "chat") throw new Error("导入响应的会话模式无效")
   return conversation
+}
+
+export async function verifyCloudImport(
+  conversationId: string, request: ConfirmedImportRequest, signal?: AbortSignal,
+): Promise<CloudMessage[]> {
+  const response = await apiFetch(`/conversations/${conversationId}/import/verify`, {
+    method: "POST", body: JSON.stringify(confirmedImportSchema.parse(request)), signal,
+  })
+  const verified = z.object({
+    conversation_id: z.string().uuid(), import_request_id: z.string(),
+    items: z.array(messageSchema).min(1).max(50),
+  }).parse(await response.json())
+  if (verified.conversation_id !== conversationId || verified.import_request_id !== request.import_request_id ||
+    verified.items.length !== request.messages.length) throw new Error("原始导入核对响应不匹配，本地副本已保留")
+  return verified.items
 }
 
 export type CloudMessage = z.infer<typeof messageSchema>

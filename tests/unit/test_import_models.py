@@ -71,3 +71,26 @@ def test_required_fields():
     for payload in [{"messages": []}, {"import_request_id": "x"}]:
         with pytest.raises(ValidationError):
             ConversationImportRequest.model_validate(payload)
+
+
+def test_confirmation_identity_is_required_and_not_part_of_original_fingerprint():
+    from uuid import uuid4
+    from src.backend.models import ConfirmedImportRequest
+    from src.backend.api.conversation_router import import_content
+    from src.backend.services.conversation_service import import_fingerprint
+
+    body = {
+        "import_request_id": "snapshot",
+        "topic": " 食堂 ",
+        "messages": [{"role": "user", "content": " 午饭 "}],
+    }
+    for identity in [{}, {"expected_user_id": "invalid"}, {"expected_user_id": None}]:
+        with pytest.raises(ValidationError):
+            ConfirmedImportRequest.model_validate({**body, **identity})
+    first = ConfirmedImportRequest.model_validate({**body, "expected_user_id": uuid4()})
+    second = ConfirmedImportRequest.model_validate(
+        {**body, "expected_user_id": uuid4()}
+    )
+    original = ConversationImportRequest.model_validate(body)
+    assert import_fingerprint(import_content(first)) == import_fingerprint(original)
+    assert import_fingerprint(import_content(second)) == import_fingerprint(original)

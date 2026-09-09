@@ -1,6 +1,7 @@
 import { z } from "zod"
 
-import { apiFetch } from "@/lib/api-client"
+import { ApiError, apiFetch, captureAuthScope } from "@/lib/api-client"
+import { publishAuthChange } from "@/features/auth/auth-sync"
 
 const userSchema = z.object({
   id: z.string().uuid(),
@@ -20,8 +21,11 @@ export interface AuthCredentials {
 }
 
 export async function getCurrentUser(signal?: AbortSignal): Promise<AuthUser> {
+  const assertCurrent = captureAuthScope()
   const response = await apiFetch("/auth/me", { signal })
-  return userSchema.parse(await response.json())
+  const user = userSchema.parse(await response.json())
+  assertCurrent()
+  return user
 }
 
 export async function loginUser(
@@ -34,6 +38,7 @@ export async function loginUser(
       password: credentials.password,
     }),
   })
+  publishAuthChange()
   return authResponseSchema.parse(await response.json()).user
 }
 
@@ -44,9 +49,16 @@ export async function registerUser(
     method: "POST",
     body: JSON.stringify(credentials),
   })
+  publishAuthChange()
   return authResponseSchema.parse(await response.json()).user
 }
 
 export async function logoutUser(): Promise<void> {
-  await apiFetch("/auth/logout", { method: "POST" })
+  try {
+    await apiFetch("/auth/logout", { method: "POST" })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) publishAuthChange()
+    throw error
+  }
+  publishAuthChange()
 }

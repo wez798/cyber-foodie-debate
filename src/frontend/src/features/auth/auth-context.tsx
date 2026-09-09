@@ -18,6 +18,7 @@ import {
   type AuthUser,
 } from "@/features/auth/auth-api"
 import { ApiError } from "@/lib/api-client"
+import { AUTH_CHANGE_EVENT } from "@/features/auth/auth-sync"
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -34,9 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const operationRef = useRef(0)
+  const [identityNotice, setIdentityNotice] = useState(false)
 
   const refresh = useCallback(async () => {
     const operation = ++operationRef.current
+    setLoading(true)
+    setUser(null)
     try {
       const restored = await getCurrentUser()
       if (operationRef.current === operation) setUser(restored)
@@ -46,6 +50,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (operationRef.current === operation) setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === "local") return
+      setIdentityNotice(true)
+      void refresh()
+    }
+    window.addEventListener(AUTH_CHANGE_EVENT, changed)
+    return () => window.removeEventListener(AUTH_CHANGE_EVENT, changed)
+  }, [refresh])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -90,13 +104,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
-    ++operationRef.current
+    const operation = ++operationRef.current
     try {
       await logoutUser()
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401)) throw error
     }
-    ++operationRef.current
+    if (operationRef.current !== operation) return
     setUser(null)
     setLoading(false)
   }, [])
@@ -106,7 +120,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, loading, login, register, logout, refresh],
   )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={value}>
+    {identityNotice && <p role="status" className="border-b bg-background px-4 py-2 text-sm">登录状态已更新，保存本地会话需重新确认当前账号。</p>}
+    {children}
+  </AuthContext.Provider>
 }
 
 export function useAuth(): AuthContextValue {

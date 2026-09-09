@@ -432,6 +432,11 @@ class ConversationImportRequest(BaseModel):
         return self
 
 
+class ConfirmedImportRequest(ConversationImportRequest):
+    # A confirmation precondition, never an owner supplied to the repository.
+    expected_user_id: UUID
+
+
 class ConversationUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -484,6 +489,12 @@ class PersistentMessageResponse(BaseModel):
 class MessagePage(BaseModel):
     items: list[PersistentMessageResponse]
     next_cursor: Optional[str] = None
+
+
+class ImportVerificationResponse(BaseModel):
+    conversation_id: UUID
+    import_request_id: str
+    items: list[PersistentMessageResponse] = Field(min_length=1, max_length=50)
 
 
 class CloudChatMessageRequest(BaseModel):

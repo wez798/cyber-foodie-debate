@@ -211,3 +211,19 @@ describe("bounded cloud history", () => {
     expect(view.result.current.state.messages.map((item) => item.content)).toEqual([1, 2, 3, 4, 5].map((index) => `消息 ${index}`))
   })
 })
+
+
+it("cancels pending pagination on a cross-tab auth event before userId rerenders", async () => {
+  const view = hook()
+  await waitFor(() => expect(view.result.current.initialLoading).toBe(false))
+  const pending = deferred<CloudMessagePage>()
+  listMock.mockReturnValueOnce(pending.promise)
+  let loading: Promise<boolean> | undefined
+  act(() => { loading = view.result.current.loadEarlier() })
+  const signal = listMock.mock.calls[1]?.[1]
+  act(() => window.dispatchEvent(new StorageEvent("storage", { key: "cyber-foodie-debate:auth-revision", newValue: "new-session" })))
+  expect(signal?.aborted).toBe(true)
+  await act(async () => { pending.resolve({ items: [message(1), message(2)], next_cursor: null }); await loading })
+  expect(view.result.current.state.messages).toHaveLength(0)
+  expect(resolved).not.toHaveBeenCalled()
+})

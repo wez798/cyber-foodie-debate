@@ -37,7 +37,7 @@ describe("confirmed import REST contract", () => {
     document.cookie = "cfd_csrf=csrf-value; Path=/"
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "invalid" }))
     vi.stubGlobal("fetch", fetchMock)
-    await expect(importCloudConversation({ import_request_id: "snapshot-1", topic: null, messages: [{ role: "user", content: "问题" }] })).rejects.toThrow()
+    await expect(importCloudConversation({ expected_user_id: conversationId, import_request_id: "snapshot-1", topic: null, messages: [{ role: "user", content: "问题" }] })).rejects.toThrow()
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/conversations/import")
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST", credentials: "include" })
   })

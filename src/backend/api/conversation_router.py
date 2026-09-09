@@ -11,11 +11,13 @@ from ..models import (
     CloudChatMessageRequest,
     CloudChatStreamDelta,
     CloudChatStreamStart,
+    ConfirmedImportRequest,
     ConversationCreateRequest,
     ConversationImportRequest,
     ConversationPage,
     ConversationResponse,
     ConversationUpdateRequest,
+    ImportVerificationResponse,
     MessagePage,
 )
 from ..services.auth_service import CurrentSession
@@ -71,12 +73,50 @@ async def list_conversations(
 
 @router.post("/import", response_model=ConversationResponse)
 async def import_conversation(
-    request: ConversationImportRequest,
+    request: ConfirmedImportRequest,
     current: CurrentSession = Depends(require_csrf),
     service: ConversationService = Depends(get_conversation_service),
 ) -> ConversationResponse:
+    require_import_identity(request, current)
     try:
-        return await service.import_history(current.user.id, request)
+        return await service.import_history(current.user.id, import_content(request))
+    except ConversationServiceError as error:
+        raise _http_error(error) from error
+
+
+def require_import_identity(
+    request: ConfirmedImportRequest, current: CurrentSession
+) -> None:
+    if request.expected_user_id != current.user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "auth_identity_changed",
+                "message": "登录身份已变化，本地副本已保留，请重新确认账号后保存",
+            },
+        )
+
+
+def import_content(request: ConfirmedImportRequest) -> ConversationImportRequest:
+    return ConversationImportRequest.model_validate(
+        request.model_dump(exclude={"expected_user_id"})
+    )
+
+
+@router.post(
+    "/{conversation_id}/import/verify", response_model=ImportVerificationResponse
+)
+async def verify_import(
+    conversation_id: UUID,
+    request: ConfirmedImportRequest,
+    current: CurrentSession = Depends(require_csrf),
+    service: ConversationService = Depends(get_conversation_service),
+) -> ImportVerificationResponse:
+    require_import_identity(request, current)
+    try:
+        return await service.verify_import(
+            current.user.id, conversation_id, import_content(request)
+        )
     except ConversationServiceError as error:
         raise _http_error(error) from error
 

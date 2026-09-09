@@ -305,15 +305,30 @@ stateDiagram-v2
 前端 `LocalChatImport` 按 user ID 挂载并隔离状态。点击时捕获完整快照，使用
 SHA-256(user ID + 本地会话 ID/模式/话题/更新时间/有序消息) 作为请求 ID；相同快照刷新后稳定，
 不同用户及修订互不串用，不在浏览器新增认证数据。预览为纯文本且不发出正文网络请求。
-POST 后校验 REST 响应并读取有界消息页核对原导入内容，才打开云端、刷新列表、尝试清理。
-若原导入内容已不在最近页，保留副本并显示无法核对，避免自动追逐全部历史。
-清理与游客存储写入共享 Web Locks，锁内比较完整快照再移除，变化或不支持锁时保留。
+POST 必须包含 `expected_user_id`（UUID），表示用户确认时的账号；服务端经过认证、Origin、
+CSRF 校验后，写入前与认证 user ID 比对。不一致返回 `409 auth_identity_changed`，缺失返回 422，
+不会进入导入服务。owner 始终取自服务端认证；该前置条件不参与原始内容指纹。
+登录、注册、退出通过 localStorage 的随机 revision 通知其他标签页重新认证，事件不包含
+用户资料、密码、Session/CSRF Token 或聊天正文。身份事件立即取消旧导入、分页和 SSE；
+请求还比较仅保留在内存中的 CSRF Cookie 值与 revision，检测事件尚未送达的会话切换。
+身份不明或变化时保留副本并提示重新确认，旧响应不导航、不清理、不更新新账号状态。
+POST 后分别读取最近一页供聊天展示，以及调用 `POST /conversations/{id}/import/verify`
+核对原始记录。核对请求使用相同的 `ConfirmedImportRequest`，同样经过认证、Origin、CSRF 和
+expected_user_id 校验。先检查归属、原始 import_request_id 与不可变指纹，再仅查询序号
+1–N（N 为原始快照条数，最多 50，SQL LIMIT N），逐条比较角色、正文、来源及完成状态。
+响应 `ImportVerificationResponse` 包含 conversation_id、import_request_id、items（1–50 条原始消息）；
+客户端复核这些字段及全部原始内容。核对不读取后续历史，也不随追加消息、改名而失效。
+每次导入后最多 1 次核对（至多 50 条）和 1 次最近页读取（至多 50 条），不自动遍历游标。
+指纹/请求 ID 不匹配返回 `409 import_conflict`，原始消息损坏返回 `409 import_verification_failed`；
+未归属或已软删除的会话核对返回 404。重放导入的软删除语义仍是 `409 import_deleted`。
+清理与游客存储写入共享 Web Locks，锁内再次检查会话变化和完整快照再移除，变化、存储失败
+或不支持锁时保留。正确账号下已经提交但随后切换账号的导入无需撤销，可保留副本安全重试。
 storage/custom event 同步当前游客内存；卸载及用户切换 abort，所有异步阶段检查取消信号。
 
 `POST /api/v1/conversations/import` 沿 API → Service → Repository → Database 调用；
 Router 复用登录、Origin、CSRF 依赖。请求模型在 `models.py`，限制见 README。
 Service 对规范化 topic 和有序 messages 的确定性 JSON（键排序、无额外空格、UTF-8）
-计算 SHA-256，不含客户端请求 ID、服务端 ID 或时间。仅 topic 去首尾空白、空值转 null，
+计算 SHA-256，不含预期账号、客户端请求 ID、服务端 ID 或时间。仅 topic 去首尾空白、空值转 null，
 正文保留原始内容。
 
 选择在 conversations 增加可空 `import_request_id`、`import_fingerprint`，以最小表结构

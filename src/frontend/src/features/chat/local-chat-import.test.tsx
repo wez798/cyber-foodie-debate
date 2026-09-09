@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { LocalChatImport, snapshotImportId } from "@/features/chat/local-chat-import"
 import { CHAT_STORAGE_KEY, saveRecentConversation, loadRecentConversation } from "@/features/chat/chat-storage"
-import { importCloudConversation, getCloudConversation, listCloudMessages, type CloudConversation, type CloudMessage } from "@/features/chat/cloud-chat-api"
+import { importCloudConversation, verifyCloudImport, getCloudConversation, listCloudMessages, type CloudConversation, type CloudMessage } from "@/features/chat/cloud-chat-api"
 import type { ChatConversation } from "@/types/chat"
 
 vi.mock("@/features/chat/cloud-chat-api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/features/chat/cloud-chat-api")>(),
-  importCloudConversation: vi.fn(), getCloudConversation: vi.fn(), listCloudMessages: vi.fn(),
+  importCloudConversation: vi.fn(), verifyCloudImport: vi.fn(), getCloudConversation: vi.fn(), listCloudMessages: vi.fn(),
 }))
 
 const local: ChatConversation = {
@@ -33,12 +33,13 @@ const onHistoryChanged = vi.fn()
 const importMock = vi.mocked(importCloudConversation)
 const readMock = vi.mocked(listCloudMessages)
 
-function entry(userId = "user-1") {
+function entry(userId = "11111111-1111-4111-8111-111111111111") {
   return <LocalChatImport key={userId} userId={userId} onOpen={onOpen} onHistoryChanged={onHistoryChanged} />
 }
 
 beforeEach(() => {
   vi.resetAllMocks()
+  document.cookie = "cfd_csrf=test-session; Path=/"
   localStorage.clear()
   localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(local))
   vi.stubGlobal("crypto", webcrypto)
@@ -48,6 +49,7 @@ beforeEach(() => {
       return action?.()
     } },
   }))
+  vi.mocked(verifyCloudImport).mockResolvedValue(messages)
   importMock.mockResolvedValue(cloud)
   vi.mocked(getCloudConversation).mockResolvedValue(cloud)
   readMock.mockResolvedValue({ items: messages, next_cursor: null })
@@ -123,7 +125,7 @@ describe("explicit local import", () => {
 
   it.each(["unreadable", "mismatched"])("preserves local data when cloud data is %s", async (failure) => {
     if (failure === "unreadable") readMock.mockRejectedValue(new Error("读取失败"))
-    else readMock.mockResolvedValue({ items: [{ ...messages[0], content: "不匹配" }, messages[1]], next_cursor: null })
+    else vi.mocked(verifyCloudImport).mockResolvedValue([{ ...messages[0], content: "不匹配" }, messages[1]])
     render(entry())
     await userEvent.click(screen.getByRole("button", { name: "保存当前本地会话" }))
     await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument())

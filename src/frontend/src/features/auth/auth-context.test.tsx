@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AuthProvider, useAuth } from "@/features/auth/auth-context"
+import { AUTH_STORAGE_KEY } from "@/features/auth/auth-sync"
 
 const {
   getCurrentUserMock,
@@ -140,5 +141,19 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "logout" }))
     expect(screen.getByText("restored@example.com")).toBeInTheDocument()
+  })
+
+  it("does not let a late logout overwrite another tab's newer login", async () => {
+    let finishLogout: (() => void) | undefined
+    getCurrentUserMock.mockResolvedValue(restoredUser)
+    logoutUserMock.mockReturnValue(new Promise<void>((resolve) => { finishLogout = resolve }))
+    render(<AuthProvider><AuthProbe /></AuthProvider>)
+    await screen.findByText("restored@example.com")
+    await userEvent.click(screen.getByRole("button", { name: "logout" }))
+    getCurrentUserMock.mockResolvedValue(loggedInUser)
+    await act(async () => window.dispatchEvent(new StorageEvent("storage", { key: AUTH_STORAGE_KEY, newValue: "changed" })))
+    await screen.findByText("login@example.com")
+    await act(async () => finishLogout?.())
+    expect(screen.getByText("login@example.com")).toBeInTheDocument()
   })
 })

@@ -27,11 +27,13 @@ export function serializeConversation(conversation: ChatConversation): string {
 export async function clearImportedConversation(
   snapshot: ChatConversation,
   signal: AbortSignal,
+  assertCurrent: () => void = () => undefined,
 ): Promise<boolean> {
   // localStorage has no compare-and-swap; preserve the copy without cross-tab locks.
   if (!navigator.locks) return false
   return navigator.locks.request(CHAT_STORAGE_LOCK, { signal }, () => {
     if (signal.aborted) return false
+    assertCurrent()
     const current = loadRecentConversation()
     if (!current || serializeConversation(current) !== serializeConversation(snapshot)) return false
     try {
