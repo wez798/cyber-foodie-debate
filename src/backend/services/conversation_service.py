@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -24,9 +25,11 @@ from ..models import (
     CloudChatStreamDone,
     CloudChatStreamError,
     ConversationCreateRequest,
+    ConversationImportRequest,
     ConversationPage,
     ConversationResponse,
     ConversationUpdateRequest,
+    ImportVerificationResponse,
     MessagePage,
     MessageStatus,
     PersistentMessageResponse,
@@ -36,6 +39,8 @@ from ..repositories.conversation_repository import (
     ConversationNotFoundError,
     ConversationRepository,
     DuplicateMessageRequestError,
+    ImportConflictError,
+    ImportDeletedError,
     PreparedGeneration,
     conversation_repository_context,
     get_conversation_repository,
@@ -135,6 +140,16 @@ def _decode_cursor(cursor: str) -> dict[str, object]:
     return value
 
 
+def import_fingerprint(request: ConversationImportRequest) -> str:
+    canonical = json.dumps(
+        request.model_dump(exclude={"import_request_id"}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class ConversationService:
     def __init__(
         self,
@@ -153,6 +168,71 @@ class ConversationService:
             user_id=user_id, mode=request.mode, topic=request.topic
         )
         return conversation_response(entity)
+
+    async def import_history(
+        self, user_id: UUID, request: ConversationImportRequest
+    ) -> ConversationResponse:
+        fingerprint = import_fingerprint(request)
+        try:
+            entity = await self.repository.import_conversation(
+                user_id=user_id, request=request, fingerprint=fingerprint
+            )
+        except ImportConflictError as error:
+            raise ConversationServiceError(
+                "import_conflict", "该导入标识已用于其他内容", status_code=409
+            ) from error
+        except ImportDeletedError as error:
+            raise ConversationServiceError(
+                "import_deleted", "原导入会话已删除，不能重新导入", status_code=409
+            ) from error
+        return conversation_response(entity)
+
+    async def verify_import(
+        self, user_id: UUID, conversation_id: UUID, request: ConversationImportRequest
+    ) -> ImportVerificationResponse:
+        entity = await self.repository.get_owned(
+            user_id=user_id, conversation_id=conversation_id
+        )
+        if not entity:
+            raise self._not_found()
+        if (
+            entity.import_request_id != request.import_request_id
+            or entity.import_fingerprint != import_fingerprint(request)
+        ):
+            raise ConversationServiceError(
+                "import_conflict", "原始导入记录不匹配，本地副本已保留", status_code=409
+            )
+        count = len(request.messages)
+        try:
+            saved = await self.repository.list_messages(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                limit=count,
+                before_sequence=count + 1,
+            )
+        except ConversationNotFoundError as error:
+            raise self._not_found() from error
+        saved.sort(key=lambda message: message.sequence_no)
+        if len(saved) != count or any(
+            actual.sequence_no != index
+            or actual.role != expected.role
+            or actual.content != expected.content
+            or actual.source != "client_import"
+            or actual.status != "complete"
+            for index, (actual, expected) in enumerate(
+                zip(saved, request.messages, strict=True), start=1
+            )
+        ):
+            raise ConversationServiceError(
+                "import_verification_failed",
+                "未能核对全部导入消息，本地副本已保留",
+                status_code=409,
+            )
+        return ImportVerificationResponse(
+            conversation_id=conversation_id,
+            import_request_id=request.import_request_id,
+            items=[message_response(message) for message in saved],
+        )
 
     async def get(self, user_id: UUID, conversation_id: UUID) -> ConversationResponse:
         entity = await self.repository.get_owned(

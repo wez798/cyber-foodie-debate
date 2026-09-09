@@ -8,7 +8,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react"
-import { useCallback, useState, type FormEvent, type KeyboardEvent } from "react"
+import { useCallback, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { MarkdownContent } from "@/components/markdown-content"
@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/features/auth/auth-context"
 import { ConversationHistory } from "@/features/chat/conversation-history"
+import { LocalChatImport } from "@/features/chat/local-chat-import"
 import { useChat } from "@/features/chat/use-chat"
 import { useCloudChat } from "@/features/chat/use-cloud-chat"
 
@@ -34,7 +35,7 @@ export function ChatPanel() {
   const navigate = useNavigate()
   const { user, loading, refresh } = useAuth()
   const [historyVersion, setHistoryVersion] = useState(0)
-  const guestChat = useChat()
+  const guestChat = useChat(!user && !loading)
 
   const handleHistoryChanged = useCallback(() => {
     setHistoryVersion((version) => version + 1)
@@ -50,6 +51,7 @@ export function ChatPanel() {
   }, [refresh])
   const cloudChat = useCloudChat({
     enabled: Boolean(user),
+    userId: user?.id,
     routeConversationId: routeConversationId ?? null,
     onConversationResolved: handleConversationResolved,
     onHistoryChanged: handleHistoryChanged,
@@ -59,6 +61,29 @@ export function ChatPanel() {
   const chat = user ? cloudChat : guestChat
   const { state, draft, setDraft, setTopic, send, stop } = chat
   const isStreaming = state.phase === "streaming"
+  const historyBlocked = Boolean(user && (cloudChat.initialLoading || cloudChat.initialError))
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const anchorRef = useRef<{ id: string; top: number; conversationId: string | null } | null>(null)
+  const loadEarlier = () => {
+    const container = scrollRef.current
+    if (container) {
+      const top = container.getBoundingClientRect().top
+      const anchor = Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]"))
+        .find((element) => element.getBoundingClientRect().bottom > top)
+      if (anchor?.dataset.messageId) anchorRef.current = { id: anchor.dataset.messageId, top: anchor.getBoundingClientRect().top, conversationId: state.conversationId }
+    }
+    void cloudChat.loadEarlier()
+  }
+  useLayoutEffect(() => {
+    if (cloudChat.loadingEarlier || !anchorRef.current) return
+    const anchor = anchorRef.current
+    anchorRef.current = null
+    if (anchor.conversationId !== state.conversationId) return
+    const container = scrollRef.current
+    const element = container && Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]"))
+      .find((item) => item.dataset.messageId === anchor.id)
+    if (container && element) container.scrollTop += element.getBoundingClientRect().top - anchor.top
+  }, [state.messages, state.conversationId, cloudChat.loadingEarlier])
 
   const handleReset = () => {
     chat.reset()
@@ -126,8 +151,11 @@ export function ChatPanel() {
 
       <CardContent className="grid gap-0 px-0 lg:grid-cols-[260px_minmax(0,1fr)]">
         <div className="space-y-4 border-b bg-muted/25 p-5 lg:border-r lg:border-b-0">
+          {user && <LocalChatImport key={user.id} userId={user.id}
+            onOpen={cloudChat.openImported} onHistoryChanged={handleHistoryChanged} />}
           {user ? (
             <ConversationHistory
+              key={user.id}
               activeId={state.conversationId}
               refreshVersion={historyVersion}
               onSelect={(conversationId) => navigate(`/chat/${conversationId}`)}
@@ -155,7 +183,7 @@ export function ChatPanel() {
               onChange={(event) => setTopic(event.target.value)}
               placeholder="例如：一食堂还是二食堂"
               maxLength={200}
-              disabled={isStreaming || Boolean(user && state.conversationId)}
+              disabled={isStreaming || historyBlocked || Boolean(user && state.conversationId)}
             />
           </div>
           <div className="rounded-md border bg-background p-3 text-xs leading-5 text-muted-foreground">
@@ -172,10 +200,21 @@ export function ChatPanel() {
 
         <section aria-labelledby="chat-heading" className="min-w-0">
           <div
+            ref={scrollRef}
+            style={{ overflowAnchor: "none" }}
             className="flex min-h-72 max-h-[520px] flex-col gap-4 overflow-y-auto p-5"
             aria-live="polite"
           >
-            {state.messages.length === 0 && (
+            {user && cloudChat.initialLoading && <p role="status">正在加载最近消息…</p>}
+            {user && cloudChat.initialError && <div role="alert">
+              <p>历史加载失败：{cloudChat.initialError}</p>
+              <Button variant="outline" onClick={cloudChat.reloadHistory}>重试加载历史</Button>
+            </div>}
+            {user && cloudChat.nextCursor && <Button variant="outline" disabled={cloudChat.loadingEarlier} onClick={loadEarlier}>
+              {cloudChat.loadingEarlier ? "正在加载更早消息…" : "加载更早消息"}
+            </Button>}
+            {user && cloudChat.earlierError && <p role="alert">{cloudChat.earlierError}；已显示消息保留，可重试当前页。</p>}
+            {state.messages.length === 0 && !historyBlocked && (
               <div className="m-auto max-w-lg text-center">
                 <Bot className="mx-auto mb-3 size-9 text-primary" aria-hidden="true" />
                 <p className="font-medium">擂台主持人已就位</p>
@@ -193,7 +232,8 @@ export function ChatPanel() {
                 !message.content
               return (
                 <div
-                  key={`${message.role}-${index}`}
+                  key={"id" in message ? String(message.id) : `${message.role}-${index}`}
+                  data-message-id={"id" in message ? String(message.id) : undefined}
                   className={`flex gap-3 ${
                     message.role === "user" ? "flex-row-reverse" : ""
                   }`}
@@ -247,7 +287,7 @@ export function ChatPanel() {
                 placeholder="输入消息，Enter 发送，Shift + Enter 换行"
                 rows={3}
                 maxLength={8000}
-                disabled={isStreaming}
+                disabled={isStreaming || historyBlocked}
               />
               <div className="mt-3 flex items-center justify-between gap-3">
                 <span className="text-xs text-muted-foreground">
@@ -259,7 +299,7 @@ export function ChatPanel() {
                     停止生成
                   </Button>
                 ) : (
-                  <Button type="submit" disabled={!draft.trim()}>
+                  <Button type="submit" disabled={!draft.trim() || historyBlocked}>
                     <Send aria-hidden="true" />
                     发送消息
                   </Button>

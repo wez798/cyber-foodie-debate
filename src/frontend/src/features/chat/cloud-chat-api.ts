@@ -35,8 +35,8 @@ const conversationPageSchema = z.object({
 })
 
 const messagePageSchema = z.object({
-  items: z.array(messageSchema),
-  next_cursor: z.string().nullable(),
+  items: z.array(messageSchema).max(50),
+  next_cursor: z.string().min(1).max(512).nullable(),
 })
 
 const streamStartSchema = z.object({
@@ -68,6 +68,59 @@ const streamErrorSchema = z.object({
 })
 
 export type CloudConversation = z.infer<typeof conversationSchema>
+const characterCount = (value: string) => Array.from(value).length
+
+export const importHistorySchema = z.object({
+  import_request_id: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  topic: z.string().nullable().transform((value) => value?.trim() || null)
+    .refine((value) => characterCount(value ?? "") <= 200, "话题不能超过 200 字符"),
+  messages: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    content: z.string().refine((value) => value.trim().length > 0 && characterCount(value) <= 8000,
+      "单条消息需包含 1–8000 字符且不能为纯空白"),
+  }).strict()).min(1, "没有可导入的消息").max(50, "最多导入 50 条消息"),
+}).strict().superRefine((value, context) => {
+  if (!value.messages.some((message) => message.role === "user")) {
+    context.addIssue({ code: "custom", message: "历史必须包含用户消息" })
+  }
+  if (characterCount(value.topic ?? "") + value.messages.reduce((sum, message) => sum + characterCount(message.content), 0) > 64000) {
+    context.addIssue({ code: "custom", message: "话题与消息合计不能超过 64000 字符" })
+  }
+})
+
+export type ImportHistoryRequest = z.infer<typeof importHistorySchema>
+export type ConfirmedImportRequest = ImportHistoryRequest & { expected_user_id: string }
+const confirmedImportSchema = importHistorySchema.safeExtend({ expected_user_id: z.string().uuid() })
+
+export async function importCloudConversation(
+  request: ConfirmedImportRequest,
+  signal?: AbortSignal,
+): Promise<CloudConversation> {
+  const response = await apiFetch("/conversations/import", {
+    method: "POST",
+    body: JSON.stringify(confirmedImportSchema.parse(request)),
+    signal,
+  })
+  const conversation = conversationSchema.parse(await response.json())
+  if (conversation.mode !== "chat") throw new Error("导入响应的会话模式无效")
+  return conversation
+}
+
+export async function verifyCloudImport(
+  conversationId: string, request: ConfirmedImportRequest, signal?: AbortSignal,
+): Promise<CloudMessage[]> {
+  const response = await apiFetch(`/conversations/${conversationId}/import/verify`, {
+    method: "POST", body: JSON.stringify(confirmedImportSchema.parse(request)), signal,
+  })
+  const verified = z.object({
+    conversation_id: z.string().uuid(), import_request_id: z.string(),
+    items: z.array(messageSchema).min(1).max(50),
+  }).parse(await response.json())
+  if (verified.conversation_id !== conversationId || verified.import_request_id !== request.import_request_id ||
+    verified.items.length !== request.messages.length) throw new Error("原始导入核对响应不匹配，本地副本已保留")
+  return verified.items
+}
+
 export type CloudMessage = z.infer<typeof messageSchema>
 export type CloudConversationPage = z.infer<typeof conversationPageSchema>
 export type CloudMessagePage = z.infer<typeof messagePageSchema>
@@ -121,7 +174,9 @@ export async function getCloudConversation(
   signal?: AbortSignal,
 ): Promise<CloudConversation> {
   const response = await apiFetch(`/conversations/${conversationId}`, { signal })
-  return conversationSchema.parse(await response.json())
+  const conversation = conversationSchema.parse(await response.json())
+  if (conversation.id !== conversationId) throw new Error("云端会话 ID 不匹配")
+  return conversation
 }
 
 export async function listCloudMessages(
@@ -129,36 +184,45 @@ export async function listCloudMessages(
   signal?: AbortSignal,
   cursor?: string | null,
 ): Promise<CloudMessagePage> {
-  const query = new URLSearchParams({ limit: "100" })
+  const query = new URLSearchParams({ limit: "50" })
   if (cursor) query.set("cursor", cursor)
   const response = await apiFetch(
     `/conversations/${conversationId}/messages?${query.toString()}`,
     { signal },
   )
-  return messagePageSchema.parse(await response.json())
+  return validateMessagePage(await response.json(), conversationId, cursor ?? null)
 }
 
-export async function listAllCloudMessages(
-  conversationId: string,
-  signal?: AbortSignal,
-): Promise<CloudMessage[]> {
-  const pages: CloudMessage[][] = []
-  const seenCursors = new Set<string>()
-  let cursor: string | null = null
+export function validateMessagePage(
+  value: unknown, conversationId: string, cursor: string | null,
+  seenCursors: ReadonlySet<string> = new Set(),
+): CloudMessagePage {
+  const parsed = messagePageSchema.safeParse(value)
+  if (!parsed.success) throw new Error("云端消息分页响应无效")
+  const page = parsed.data
+  if (page.next_cursor && (page.next_cursor === cursor || seenCursors.has(page.next_cursor))) {
+    throw new Error("云端消息分页游标重复，请重试当前页")
+  }
+  if ((page.next_cursor && page.items.length === 0) || page.items.some((item) => item.conversation_id !== conversationId)) {
+    throw new Error("云端消息分页响应无效")
+  }
+  return { ...page, items: mergeCloudMessages([], page.items) }
+}
 
-  do {
-    const page = await listCloudMessages(conversationId, signal, cursor)
-    pages.push(page.items)
-    cursor = page.next_cursor
-    if (cursor) {
-      if (seenCursors.has(cursor)) {
-        throw new Error("云端消息分页游标重复，无法完整恢复会话")
-      }
-      seenCursors.add(cursor)
+export function mergeCloudMessages(current: CloudMessage[], incoming: CloudMessage[]): CloudMessage[] {
+  const merged = new Map<string, CloudMessage>()
+  const sequences = new Map<number, string>()
+  for (const message of [...current, ...incoming]) {
+    const existing = merged.get(message.id)
+    if ((existing && (existing.sequence_no !== message.sequence_no || existing.role !== message.role || existing.conversation_id !== message.conversation_id)) ||
+      (sequences.has(message.sequence_no) && sequences.get(message.sequence_no) !== message.id)) {
+      throw new Error("云端消息 ID 或顺序不一致")
     }
-  } while (cursor)
-
-  return pages.reverse().flat()
+    // Existing complete content wins over an older history response.
+    if (!existing || (existing.status === "generating" && message.status !== "generating")) merged.set(message.id, message)
+    sequences.set(message.sequence_no, message.id)
+  }
+  return [...merged.values()].sort((left, right) => left.sequence_no - right.sequence_no)
 }
 
 export function createClientRequestId(): string {

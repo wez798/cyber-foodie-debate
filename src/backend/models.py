@@ -395,6 +395,48 @@ class ConversationCreateRequest(BaseModel):
         return value
 
 
+class ImportMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("content")
+    @classmethod
+    def require_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("消息内容不能为空")
+        return value
+
+
+class ConversationImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    import_request_id: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    topic: Optional[str] = Field(default=None, max_length=200)
+    messages: list[ImportMessage] = Field(min_length=1, max_length=50)
+
+    @field_validator("topic", mode="before")
+    @classmethod
+    def normalize_topic(cls, value: object) -> object:
+        return (value.strip() or None) if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_history(self) -> "ConversationImportRequest":
+        if not any(message.role == "user" for message in self.messages):
+            raise ValueError("历史必须包含用户消息")
+        if len(self.topic or "") + sum(len(m.content) for m in self.messages) > 64000:
+            raise ValueError("话题与消息合计不能超过 64000 字符")
+        return self
+
+
+class ConfirmedImportRequest(ConversationImportRequest):
+    # A confirmation precondition, never an owner supplied to the repository.
+    expected_user_id: UUID
+
+
 class ConversationUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -447,6 +489,12 @@ class PersistentMessageResponse(BaseModel):
 class MessagePage(BaseModel):
     items: list[PersistentMessageResponse]
     next_cursor: Optional[str] = None
+
+
+class ImportVerificationResponse(BaseModel):
+    conversation_id: UUID
+    import_request_id: str
+    items: list[PersistentMessageResponse] = Field(min_length=1, max_length=50)
 
 
 class CloudChatMessageRequest(BaseModel):

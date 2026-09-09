@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { AUTH_CHANGED_MESSAGE, authGeneration, authRevision, invalidateAuth } from "@/features/auth/auth-sync"
 
 const localBackendOrigin = `${window.location.protocol}//${window.location.hostname}:8000`
 export const API_BASE_URL = (
@@ -51,6 +52,21 @@ function cookieValue(name: string): string | null {
   }
 }
 
+// The CSRF cookie is used only as an in-memory session-change fence, never as identity.
+// The server independently checks expected_user_id against its authenticated principal.
+export function captureAuthScope(requireSession = false): () => void {
+  const csrf = cookieValue(CSRF_COOKIE_NAME)
+  const revision = authRevision()
+  const generation = authGeneration()
+  return () => {
+    if ((requireSession && !csrf) || csrf !== cookieValue(CSRF_COOKIE_NAME) || revision !== authRevision()) {
+      // A late response must not invalidate the new account a second time.
+      if (generation === authGeneration()) invalidateAuth()
+      throw new ApiError(AUTH_CHANGED_MESSAGE, 409, "auth_identity_changed")
+    }
+  }
+}
+
 async function responseError(response: Response): Promise<ApiError> {
   try {
     const parsed = errorSchema.parse(await response.json())
@@ -86,6 +102,7 @@ export async function apiFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
+  const assertCurrent = captureAuthScope()
   const method = (init.method ?? "GET").toUpperCase()
   const headers = new Headers(init.headers)
   if (init.body && !headers.has("Content-Type")) {
@@ -101,6 +118,12 @@ export async function apiFetch(
     headers,
     credentials: "include",
   })
-  if (!response.ok) throw await responseError(response)
+  if (!path.startsWith("/auth/")) assertCurrent()
+  if (!response.ok) {
+    const error = await responseError(response)
+    if (!path.startsWith("/auth/")) assertCurrent()
+    if (error.code === "auth_identity_changed") invalidateAuth()
+    throw error
+  }
   return response
 }
