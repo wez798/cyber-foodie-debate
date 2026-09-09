@@ -1,8 +1,7 @@
-import { AlertCircle, ChefHat, LogOut, RotateCcw, ShieldCheck } from "lucide-react"
+import { AlertCircle, RotateCcw } from "lucide-react"
 import { useEffect } from "react"
 import {
   BrowserRouter,
-  Link,
   Navigate,
   Route,
   Routes,
@@ -11,9 +10,9 @@ import {
 } from "react-router-dom"
 import { toast } from "sonner"
 
-import { PageModeSwitch, type PageMode } from "@/components/page-mode-switch"
+import { AppHeader } from "@/components/app-header"
+import type { PageMode } from "@/components/page-mode-switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { AuthProvider, useAuth } from "@/features/auth/auth-context"
@@ -24,14 +23,6 @@ import { PreferenceForm } from "@/features/debate/components/preference-form"
 import { ResultPanel } from "@/features/debate/components/result-panel"
 import { useDebate } from "@/features/debate/hooks/use-debate"
 import type { FoodPreference } from "@/types/debate"
-
-const phaseLabel = {
-  idle: "待开赛",
-  submitting: "连接中",
-  streaming: "直播中",
-  completed: "已完成",
-  error: "需重试",
-}
 
 function AppShell() {
   const location = useLocation()
@@ -137,67 +128,7 @@ function AppShell() {
 
   return (
     <div className="min-h-svh bg-background text-foreground">
-      <header className="border-b bg-[#fffdf8]">
-        <div className="mx-auto flex max-w-[1480px] flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <ChefHat className="size-6" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold sm:text-3xl">
-                Cyber Foodie Debate
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {page === "chat"
-                  ? "校园干饭搭子，随时聊、随时推荐。"
-                  : "两位大厨，三轮交锋，一个明确答案。"}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <PageModeSwitch value={page} onChange={handlePageChange} />
-            {page === "debate" && (
-              <>
-                <Badge variant="outline" className="bg-background">
-                  <ShieldCheck aria-hidden="true" />
-                  固定 3 轮
-                </Badge>
-                <Badge
-                  className={
-                    state.phase === "streaming"
-                      ? "bg-[#277a68] text-white hover:bg-[#277a68]"
-                      : undefined
-                  }
-                  variant={state.phase === "streaming" ? "default" : "secondary"}
-                >
-                  {phaseLabel[state.phase]}
-                </Badge>
-              </>
-            )}
-            {!loading &&
-              (user ? (
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">
-                    {user.display_name || user.email}
-                  </Badge>
-                  <Button size="sm" variant="outline" onClick={handleLogout}>
-                    <LogOut aria-hidden="true" />
-                    退出
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Button size="sm" variant="ghost" asChild>
-                    <Link to="/login">登录</Link>
-                  </Button>
-                  <Button size="sm" asChild>
-                    <Link to="/register">注册</Link>
-                  </Button>
-                </>
-              ))}
-          </div>
-        </div>
-      </header>
+      <AppHeader page={page} onPageChange={handlePageChange} user={user} loading={loading} onLogout={handleLogout} />
 
       <main className="mx-auto max-w-[1480px] space-y-8 px-4 py-6 sm:px-6 lg:px-8">
         <div
