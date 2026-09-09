@@ -9,8 +9,9 @@ import type {
   ChatStreamStart,
 } from "@/types/chat"
 
+const localBackendOrigin = `${window.location.protocol}//${window.location.hostname}:8000`
 const CHAT_API_BASE_URL = (
-  import.meta.env.VITE_CHAT_API_BASE_URL ?? "http://localhost:8000/api"
+  import.meta.env.VITE_CHAT_API_BASE_URL ?? `${localBackendOrigin}/api`
 ).replace(/\/$/, "")
 
 interface StreamChatOptions {

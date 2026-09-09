@@ -4,10 +4,12 @@ import json
 from datetime import datetime
 from enum import Enum
 from typing import Literal, Optional
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    EmailStr,
     Field,
     JsonValue,
     field_validator,
@@ -316,4 +318,175 @@ class ChatStreamError(BaseModel):
     """响应头发出后通过 SSE 传递的错误事件。"""
 
     conversation_id: str
+    error: ChatErrorDetail
+
+
+class UserRegisterRequest(BaseModel):
+    """Validated first-party account registration request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(max_length=128)
+    display_name: Optional[str] = Field(default=None, max_length=80)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def normalize_display_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+class UserLoginRequest(BaseModel):
+    """Validated email/password login request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class UserResponse(BaseModel):
+    """Safe public account representation."""
+
+    id: UUID
+    email: EmailStr
+    display_name: Optional[str] = None
+    created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    """Authentication response; secrets are delivered only as cookies."""
+
+    user: UserResponse
+
+
+class MessageStatus(str, Enum):
+    COMPLETE = "complete"
+    GENERATING = "generating"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ConversationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal[ChatMode.CHAT] = ChatMode.CHAT
+    topic: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("topic", mode="before")
+    @classmethod
+    def normalize_topic(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+class ConversationUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    archived: Optional[bool] = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def require_change(self) -> "ConversationUpdateRequest":
+        if self.title is None and self.archived is None:
+            raise ValueError("至少提交一个可更新字段")
+        return self
+
+
+class ConversationResponse(BaseModel):
+    id: UUID
+    mode: ChatMode
+    topic: Optional[str] = None
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    archived_at: Optional[datetime] = None
+
+
+class ConversationPage(BaseModel):
+    items: list[ConversationResponse]
+    next_cursor: Optional[str] = None
+
+
+class PersistentMessageResponse(BaseModel):
+    id: UUID
+    conversation_id: UUID
+    sequence_no: int
+    role: Literal["user", "assistant"]
+    content: str
+    status: MessageStatus
+    client_request_id: Optional[str] = None
+    reply_to_message_id: Optional[UUID] = None
+    finish_reason: Optional[str] = None
+    error_code: Optional[str] = None
+    source: Literal["server", "client_import"] = "server"
+    created_at: datetime
+    updated_at: datetime
+
+
+class MessagePage(BaseModel):
+    items: list[PersistentMessageResponse]
+    next_cursor: Optional[str] = None
+
+
+class CloudChatMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=8000)
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("消息内容不能为空")
+        return value
+
+
+class CloudChatStreamStart(BaseModel):
+    conversation_id: UUID
+    user_message_id: UUID
+    assistant_message_id: UUID
+
+
+class CloudChatStreamDelta(BaseModel):
+    conversation_id: UUID
+    assistant_message_id: UUID
+    delta: str = Field(min_length=1)
+
+
+class CloudChatStreamDone(BaseModel):
+    conversation_id: UUID
+    user_message_id: UUID
+    assistant_message: PersistentMessageResponse
+
+
+class CloudChatStreamError(BaseModel):
+    conversation_id: UUID
+    assistant_message_id: UUID
     error: ChatErrorDetail

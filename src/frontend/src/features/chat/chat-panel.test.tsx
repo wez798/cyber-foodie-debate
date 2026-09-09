@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatPanel } from "@/features/chat/chat-panel"
@@ -7,11 +8,28 @@ import { streamChat } from "@/features/chat/chat-api"
 import { CHAT_STORAGE_KEY } from "@/features/chat/chat-storage"
 import type { ChatStreamDone } from "@/types/chat"
 
+const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }))
+
 vi.mock("@/features/chat/chat-api", () => ({
   streamChat: vi.fn(),
 }))
+vi.mock("@/features/auth/auth-context", () => ({
+  useAuth: () => ({
+    user: null,
+    loading: false,
+    refresh: refreshMock,
+  }),
+}))
 
 const streamChatMock = vi.mocked(streamChat)
+
+function renderChatPanel() {
+  return render(
+    <MemoryRouter initialEntries={["/chat"]}>
+      <ChatPanel />
+    </MemoryRouter>,
+  )
+}
 
 const doneEvent: ChatStreamDone = {
   conversation_id: "conversation-1",
@@ -52,7 +70,7 @@ describe("chat panel", () => {
       return doneEvent
     })
 
-    render(<ChatPanel />)
+    renderChatPanel()
     const user = userEvent.setup()
     await user.type(screen.getByLabelText("聊天消息"), "推荐一道菜")
     await user.click(screen.getByRole("button", { name: "发送消息" }))
@@ -95,7 +113,7 @@ describe("chat panel", () => {
       }),
     )
 
-    render(<ChatPanel />)
+    renderChatPanel()
 
     expect(screen.getByText("想吃清淡的")).toBeInTheDocument()
     expect(screen.getByText("可以试试番茄鸡蛋面。")).toBeInTheDocument()

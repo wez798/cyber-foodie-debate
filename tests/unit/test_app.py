@@ -14,3 +14,17 @@ def test_root_endpoint_is_available_without_external_health_checks() -> None:
         "version": "0.1.0",
         "docs": "/docs",
     }
+
+
+def test_liveness_is_lightweight_and_unknown_cors_origin_is_rejected() -> None:
+    client = TestClient(create_app())
+
+    assert client.get("/health/live").json() == {"status": "ok"}
+    preflight = client.options(
+        "/api/v1/auth/login",
+        headers={
+            "Origin": "https://attacker.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in preflight.headers

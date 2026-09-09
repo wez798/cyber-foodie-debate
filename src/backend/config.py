@@ -1,6 +1,6 @@
 """Application configuration using Pydantic Settings."""
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,9 +33,39 @@ class Settings(BaseSettings):
     app_port: int = 8000
     debug: bool = False
 
+    # 数据库与认证
+    database_url: str = (
+        "postgresql+asyncpg://cyber_foodie:cyber_foodie@localhost:5432/cyber_foodie"
+    )
+    database_ready_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    frontend_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5185",
+            "http://127.0.0.1:5185",
+        ]
+    )
+    session_cookie_name: str = "cfd_session"
+    csrf_cookie_name: str = "cfd_csrf"
+    session_ttl_seconds: int = Field(default=604_800, ge=300, le=2_592_000)
+    session_cookie_secure: bool = False
+    password_min_length: int = Field(default=10, ge=8, le=128)
+    cloud_generation_stale_seconds: int = Field(default=180, ge=30, le=3600)
+
     # 辩论配置
     max_debate_rounds: int = 3
     debate_timeout_seconds: int = 60
+
+    @field_validator("frontend_origins")
+    @classmethod
+    def validate_frontend_origins(cls, value: list[str]) -> list[str]:
+        origins = [origin.strip().rstrip("/") for origin in value if origin.strip()]
+        if not origins or "*" in origins:
+            raise ValueError("FRONTEND_ORIGINS 必须包含明确来源，不能使用通配符")
+        return origins
 
 
 settings = Settings()
