@@ -353,6 +353,16 @@ client_import、status 为 complete，时间为服务端带时区 UTC。导入�
 - `FRONTEND_ORIGINS` 是允许携带凭据的浏览器来源 JSON 数组；HTTPS 部署必须同时设置
   `SESSION_COOKIE_SECURE=true`。Compose 从 `.env` 透传二者。
 - Nginx 对登录/注册和其余 `/api/` 请求分别按客户端 IP 限流。
-- Docker 健康检查只访问本地轻量存活接口，不调用真实 LLM 或 TTS。
+- Docker 后端健康检查访问 `/health/ready`（数据库连接），前端访问 `/healthz`；`/health/live` 只表示后端存活。均不调用 LLM/TTS；`/api/v1/health` 会主动探测外部服务。
 - `DebateService` 对完整辩论设置整体超时；失败、超时和取消不会生成兜底成功结果。
 - `LLMService` 同时限制进程内并发和每分钟上游调用数，超过本地频率限制时快速返回 429。
+
+### 最终交付边界
+
+页头账户入口复用既有认证状态，历史列表提供“最近会话”和“已归档”。归档筛选复用 `include_archived=true` 的分页响应并在当前累计页中过滤；恢复发送 `{ "archived": false }`，不新增实体或接口。每次主动加载至多一页，切换筛选、账号或卸载取消旧请求；操作完成后先验证认证状态，不能关闭用户后来选择的另一会话。
+
+中文组合输入 Enter 不提交；游客新会话需确认清除，取消辩论后忽略迟到事件。语音失败保留裁决，播放可以重试。辩论为单进程内存数据，不提供刷新恢复或持久化。
+
+`scripts/run_demo.py` 是交付验收工具，不进入生产镜像：新建临时 SQLite、执行现有迁移，覆盖聊天/辩论与 TTS 外部依赖，使用独立 Cookie、绑定回环地址。文本标记为固定样例，音频为生成的 WAV 测试音；不声称模型或语音服务成功。正常启动路径不启用这些替身。
+
+Compose 在服务启动前通过 `python -m alembic upgrade head` 执行迁移，不依赖运行镜像未复制的 CLI 入口。Nginx `try_files $uri $uri/ /index.html` 覆盖所有前端深链接；真实容器启动与路由回退验收结果以 [final-delivery.md](final-delivery.md) 为准。

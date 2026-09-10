@@ -6,6 +6,10 @@
 
 > 🍔 川辣派 vs 粤式养生派 — 让两个AI大厨为你辩论今天吃什么！
 
+面向校园“今天吃什么”的工程实践作品：可以与干饭搭子自由聊天，也可以让两位大厨围绕饮食偏好辩论并给出推荐。本项目已完成功能冻结，不以生产级账号平台为目标。
+
+演示顺序见 [演示指南](docs/demo-guide.md)，实际验收结果与未验证项见 [最终交付报告](docs/final-delivery.md)。真实 AI 与语音需要外部网络；无授权或断网时可使用下述明确标注的离线演示。
+
 ## 系统架构图
 
 ```mermaid
@@ -43,7 +47,8 @@ graph TB
 
 - Python 3.11
 - Node.js 22.13+（或 24+）
-- pnpm
+- pnpm（项目锁定 11.19.0）
+- PostgreSQL 17（真实云端数据运行环境；离线演示不需要）
 
 ```bash
 # 克隆仓库
@@ -68,15 +73,30 @@ SILICONFLOW_MAX_CONCURRENCY=4
 ### 2. 本地开发启动
 
 ```bash
-# 安装后端依赖
-pip install -r src/backend/requirements.txt
+# 建议先创建并激活虚拟环境
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# PowerShell: .venv/Scripts/Activate.ps1
 
-# 创建数据库并执行迁移（DATABASE_URL 取自 .env）
-alembic upgrade head
+# 安装运行及测试依赖
+python -m pip install -r requirements.txt
+
+# 先在 PostgreSQL 中创建专用角色与数据库（见下文），再迁移
+python -m alembic upgrade head
+python -m alembic check
 
 # 启动后端服务
 python -m src.backend.main
 ```
+
+本地 PostgreSQL 需先安装并启动。以下管理命令仅用于新建开发库，已有数据库请勿重复创建或清理：
+
+```bash
+createuser -h localhost -U postgres --pwprompt cyber_foodie
+createdb -h localhost -U postgres --owner=cyber_foodie cyber_foodie
+```
+
+将该角色密码填入 `.env` 的 `DATABASE_URL`；URL 中的特殊字符必须正确编码。`POSTGRES_*` 用于 Compose 的数据库初始化，不能替代本地 PostgreSQL 安装；Compose 的 db 服务默认不向主机暴露 5432 端口。
 
 另开终端启动前端：
 
@@ -96,10 +116,28 @@ pnpm dev
 
 访问 http://localhost:5173 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
 
+### 离线演示（不调用真实外部服务）
+
+安装上述依赖后，在根目录运行 `python scripts/run_demo.py`。脚本新建临时 SQLite 并执行真实迁移，监听 `127.0.0.1:8000`；退出即删除本次演示数据，不连接 `.env` 中的数据库。固定回复明确标注“非真实 AI”，音频只是一段测试提示音，不是语音合成。
+
+前端须使用专用 CSRF Cookie 名。在另一个 PowerShell 终端执行：
+
+```powershell
+cd src/frontend
+$env:VITE_API_BASE_URL="http://localhost:8000/api/v1"
+$env:VITE_CHAT_API_BASE_URL="http://localhost:8000/api"
+$env:VITE_CSRF_COOKIE_NAME="cfd_demo_csrf"
+pnpm dev
+```
+
+Bash 使用 `VITE_API_BASE_URL=http://localhost:8000/api/v1 VITE_CHAT_API_BASE_URL=http://localhost:8000/api VITE_CSRF_COOKIE_NAME=cfd_demo_csrf pnpm dev`。打开 `http://localhost:5173`。用隔离浏览器和测试账号；重启后需重新注册。`--tts-fail` 可演示语音服务失败；`--port` 与 `--frontend-origin` 支持独立端口。切回正常后端时恢复前端三个变量，Cookie 名须与后端配置一致。
+
 ### 3. Docker Compose 一键启动
 
 ```bash
-docker compose up --build
+docker compose up --build -d
+docker compose ps
+docker compose logs backend
 ```
 
 Compose 要求先在 `.env` 中设置 `POSTGRES_PASSWORD`。生产 HTTPS 部署还必须设置
@@ -107,8 +145,7 @@ Compose 要求先在 `.env` 中设置 `POSTGRES_PASSWORD`。生产 HTTPS 部署�
 这两个值会由 Compose 原样传给后端，不需要修改编排文件。
 
 访问 http://localhost:3000 使用前端，访问 http://localhost:8000/docs 查看 API 文档。
-前端镜像通过 pnpm 构建 Vite 产物，并由 Nginx 托管；`/chat`、`/debate` 支持直接访问
-和刷新，`/api/` 由 Nginx 反向代理到 FastAPI。后端容器的存活检查只访问轻量根接口，
+前端镜像通过 pnpm 构建 Vite 产物，并由 Nginx 托管；`/chat`、`/chat/:id`、`/debate`、`/login`、`/register` 配置了 SPA 刷新回退，`/api/` 由 Nginx 反向代理到 FastAPI。后端容器检查 `/health/ready` 的数据库连接，
 不会周期性调用 LLM 或 TTS。Nginx 对认证入口和其余 API 分别实施按 IP 限流；若前面
 还有反向代理，应同时配置可信真实客户端 IP 传递规则。
 
@@ -170,7 +207,7 @@ cyber-foodie-debate/
 | 对话历史       | 游客本地保存；登录用户云端分页持久化 | ✅ MVP  |
 | TTS语音播报    | 微软TTS朗读辩论结果     | ✅ MVP      |
 | 后端对话持久化 | PostgreSQL + Alembic，支持中断终态与幂等重放 | ✅ MVP |
-| GitHub API集成 | 自动获取commit生成梗图  | ❌ 规划中   |
+| 账号与历史管理 | 注册/登录/退出、显式导入、归档/恢复/删除 | ✅ 已实现 |
 
 ## API 文档
 
@@ -180,7 +217,8 @@ cyber-foodie-debate/
 
 | 方法 | 路径                            | 描述     |
 | ---- | ------------------------------- | -------- |
-| GET  | `/api/v1/health`              | 健康检查 |
+| GET | `/health/live`、`/health/ready` | 存活、数据库就绪；不调用外部服务 |
+| GET  | `/api/v1/health` | 主动探测真实 LLM/TTS，会产生外部请求 |
 | POST | `/api/chat`                   | 非流式对话兜底 |
 | POST | `/api/chat/stream`            | POST SSE 流式对话 |
 | POST | `/api/v1/auth/register`       | 注册并创建安全会话 |
@@ -220,7 +258,7 @@ cyber-foodie-debate/
 正反方和主持裁决则由独立的辩论页面负责，不向用户展示 Prompt 模式切换。
 流式接口依次发送 `start`、多个 `delta`、`done` SSE 事件；若响应头已发出后
 上游失败，则发送 `error` 事件。当前聊天响应中的 `tts.status` 固定为
-`not_requested`，仅作为下一步接入 edge-tts 的扩展点。
+`not_requested`；语音仅用于辩论结果，聊天语音不在交付范围。
 
 辩论流依次发送 `session_start`、多个 `round`、`result`；只有有效裁决才会发送
 `result`。上游失败或整体超时时发送结构化 `error`，客户端不得把它显示为完成。
@@ -245,7 +283,7 @@ cyber-foodie-debate/
 成功响应经运行时校验，再读取云端会话与有界消息页，核对导入的角色、正文、顺序、来源和状态，
 打开云端会话并刷新列表。全部确认后，仅在本地快照仍相同时清理副本；清理同步更新游客内存。
 所有本地写入与清理共用 Web Locks 跨标签页锁；浏览器不支持锁、内容已变化、读取失败或取消，
-均保留本地数据。旧导入会话若已追加大量消息、最近页不能核对全部原消息，也保留副本并说明原因。
+均保留本地数据。核对独立读取原始最多 50 条消息，追加大量消息或改名后仍可安全重试。
 账号切换、登出或卸载会取消请求，旧响应不会导航或清理。密码和认证 Token 不存 localStorage。
 
 ### API 契约
@@ -268,9 +306,17 @@ user，可结束于 assistant；每条正文 1–8000 字符且不能纯空白�
 `409 import_conflict`，消息核对失败为 `409 import_verification_failed`，无权限或软删除为 404。
 追加消息或改名后仍可重放并核对；聊天视图单独读取最近一页，由用户主动加载更早消息。
 账号变化、读取/核对失败或本地副本变化时保留本地内容，并要求重新确认账号后保存。
-本次修复无数据库变更，继续使用现有迁移 head。
-部署前在目标开发数据库执行 `alembic upgrade head`；新迁移为 `20260908_0002`，
-随后执行 `alembic check`。本阶段不含 OAuth、邮件验证、密码找回或辩论持久化。
+最终迁移 head 为 `20260908_0002`。部署前在已确认的目标数据库执行 `python -m alembic upgrade head`，
+随后执行 `python -m alembic check`；升级已有数据前自行备份，禁止通过清库解决迁移问题。本阶段不含 OAuth、邮件验证、密码找回或辩论持久化。
+
+## 数据与运行限制
+
+- 游客完整聊天仅在当前浏览器保存；登录不会自动上传。开启新游客对话需确认清除，本地存储受浏览器容量与隐私设置影响。
+- 云端会话按认证用户隔离；“已归档”入口可恢复会话，删除为软删除且 UI 不提供撤销。归档筛选逐页进行，不自动扫描全部历史。
+- 辩论会话只在后端进程内存中，页面刷新不恢复辩论结果；重启后原结果语音不可合成，不支持多进程共享辩论状态。
+- 真实 LLM 需要有效 `SILICONFLOW_API_KEY`、网络和额度；edge-tts 不需要本项目 API Key，但需要网络可达。语音失败不影响已有文字结果。本轮未获真实服务调用授权。
+- 未实现修改密码、邮件验证、密码找回、OAuth、Session 管理页面、管理员后台或辩论持久化。
+- `/health/live` 仅表示进程存活；`/health/ready` 仅表示数据库可连接，不代表已迁移或真实 AI 可用。先完成迁移再启动。不要把 `/api/v1/health` 用作默认离线检查。
 
 ## 技术栈
 
