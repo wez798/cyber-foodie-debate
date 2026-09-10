@@ -26,7 +26,7 @@ cd src/frontend
 pnpm install --frozen-lockfile
 ```
 
-本地开发时，在仓库根目录启动后端：
+配置专用 PostgreSQL 数据库后，先在仓库根目录执行 `python -m alembic upgrade head` 和 `python -m alembic check`，再启动后端：
 
 ```bash
 python -m src.backend.main
@@ -170,3 +170,18 @@ alembic check
 - [ ] 若修改前端路由或构建方式，已同步验证生产静态部署
 - [ ] 已更新相关文档（README/docs）
 - [ ] 至少一名组员已 Code Review
+
+## 冻结后的验收规则
+
+功能已冻结，只接受阻断修复与交付材料更新。离线浏览器演示使用 `python scripts/run_demo.py`，前端配置 `VITE_CSRF_COOKIE_NAME=cfd_demo_csrf`，详见 README；固定回复与测试提示音不能作为真实服务成功证据。
+
+集成测试运行前必须明确 `TEST_DATABASE_URL` 指向可销毁的专用数据库，默认 fixture 会执行建表和清表。请在仓库根目录运行测试，迁移用例依赖根目录 Alembic 配置。PowerShell 示例：
+
+```powershell
+$env:TEST_DATABASE_URL="sqlite+aiosqlite:///D:/temporary/cfd-tests.db"
+python -m pytest tests/integration -v
+```
+
+目录须事先存在且数据库必须专用于本次测试；PostgreSQL 验收应改用专用 PostgreSQL URL，SQLite 不替代该项。现有 fixture 还会尝试删除 `tmp/auth_chat_integration.db`，执行前确认该路径没有用户数据。不要用 `docker compose down -v` 清理共享环境。
+
+交付验收操作与预期结果见 [demo-guide.md](docs/demo-guide.md)，本轮实际结果见 [final-delivery.md](docs/final-delivery.md)。仅已执行成功的检查标记通过；Docker、真实 LLM/TTS、真实移动设备等未执行项目保留限制说明。

@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import App from "@/App"
-import { streamDebate } from "@/features/debate/api/debate-api"
+import { streamDebate, synthesizeDebateResult } from "@/features/debate/api/debate-api"
 import type { DebateStreamEvent, ResultData } from "@/types/debate"
 
 vi.mock("@/features/debate/api/debate-api", () => ({
@@ -175,5 +175,33 @@ describe("Cyber Foodie Debate app", () => {
     await user.click(screen.getByRole("button", { name: "重试" }))
     await waitFor(() => expect(streamDebateMock).toHaveBeenCalledTimes(2))
     expect(await screen.findByText("今日推荐：麻辣香锅")).toBeInTheDocument()
+  })
+
+  it("keeps the result usable when speech synthesis fails", async () => {
+    streamDebateMock.mockImplementation(completeStream)
+    vi.mocked(synthesizeDebateResult).mockRejectedValueOnce(new Error("语音暂不可用"))
+    render(<App />)
+    const user = await fillRequiredFields()
+    await user.click(screen.getByRole("button", { name: "开始三轮辩论" }))
+    await user.click(await screen.findByRole("button", { name: "播放语音战报" }))
+    expect(await screen.findByText("语音暂不可用")).toBeInTheDocument()
+    expect(screen.getByText("今日推荐：麻辣香锅")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "播放语音战报" })).toBeEnabled()
+    await user.click(screen.getByRole("button", { name: "再来一场" }))
+    expect(screen.queryByText("今日推荐：麻辣香锅")).not.toBeInTheDocument()
+  })
+
+  it("ignores results delivered after cancellation", async () => {
+    let finish!: () => void
+    streamDebateMock.mockImplementation((_request, options) => new Promise((resolve) => {
+      finish = () => { options.onEvent({ event: "result", data: completedResult }); resolve(completedResult) }
+    }))
+    render(<App />)
+    const user = await fillRequiredFields()
+    await user.click(screen.getByRole("button", { name: "开始三轮辩论" }))
+    await user.click(screen.getByRole("button", { name: "取消" }))
+    await act(async () => finish())
+    expect(screen.queryByText("今日推荐：麻辣香锅")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "开始三轮辩论" })).toBeEnabled()
   })
 })

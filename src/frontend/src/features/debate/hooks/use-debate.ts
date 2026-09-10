@@ -107,10 +107,10 @@ export function useDebate() {
       try {
         await streamDebate(createRequest(preference), {
           signal: controller.signal,
-          onOpen: () => dispatch({ type: "open" }),
-          onEvent: (event) => dispatch({ type: "event", event }),
+          onOpen: () => { if (!controller.signal.aborted) dispatch({ type: "open" }) },
+          onEvent: (event) => { if (!controller.signal.aborted) dispatch({ type: "event", event }) },
         })
-        return true
+        return !controller.signal.aborted
       } catch (error) {
         if (controller.signal.aborted) return false
         dispatch({

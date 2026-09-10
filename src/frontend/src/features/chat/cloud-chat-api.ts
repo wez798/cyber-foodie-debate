@@ -162,8 +162,10 @@ export async function createCloudConversation(
 export async function listCloudConversations(
   signal?: AbortSignal,
   cursor?: string | null,
+  includeArchived = false,
 ): Promise<CloudConversationPage> {
   const query = new URLSearchParams({ limit: "50" })
+  if (includeArchived) query.set("include_archived", "true")
   if (cursor) query.set("cursor", cursor)
   const response = await apiFetch(`/conversations?${query.toString()}`, { signal })
   return conversationPageSchema.parse(await response.json())
@@ -247,17 +249,26 @@ export function createClientRequestId(): string {
 
 export async function archiveCloudConversation(
   conversationId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   await apiFetch(`/conversations/${conversationId}`, {
     method: "PATCH",
     body: JSON.stringify({ archived: true }),
+    signal,
+  })
+}
+
+export async function restoreCloudConversation(conversationId: string, signal?: AbortSignal): Promise<void> {
+  await apiFetch(`/conversations/${conversationId}`, {
+    method: "PATCH", body: JSON.stringify({ archived: false }), signal,
   })
 }
 
 export async function deleteCloudConversation(
   conversationId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await apiFetch(`/conversations/${conversationId}`, { method: "DELETE" })
+  await apiFetch(`/conversations/${conversationId}`, { method: "DELETE", signal })
 }
 
 function decodeCloudEvent(message: ServerSentEvent): CloudStreamEvent | null {
