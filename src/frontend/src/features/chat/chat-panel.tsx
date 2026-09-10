@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import { useCallback, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
+import { toast } from "sonner"
 
 import { MarkdownContent } from "@/components/markdown-content"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -86,6 +87,7 @@ export function ChatPanel() {
   }, [state.messages, state.conversationId, cloudChat.loadingEarlier])
 
   const handleReset = () => {
+    if (!user && state.messages.length > 0 && !window.confirm("新对话会清除当前游客本地历史，确定继续吗？")) return
     chat.reset()
     if (user) navigate("/chat")
   }
@@ -96,6 +98,7 @@ export function ChatPanel() {
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
       event.currentTarget.form?.requestSubmit()
@@ -151,11 +154,11 @@ export function ChatPanel() {
 
       <CardContent className="grid gap-0 px-0 lg:grid-cols-[260px_minmax(0,1fr)]">
         <div className="space-y-4 border-b bg-muted/25 p-5 lg:border-r lg:border-b-0">
-          {user && <LocalChatImport key={user.id} userId={user.id}
+          {user && <LocalChatImport key={`import-${user.id}`} userId={user.id}
             onOpen={cloudChat.openImported} onHistoryChanged={handleHistoryChanged} />}
           {user ? (
             <ConversationHistory
-              key={user.id}
+              key={`history-${user.id}`}
               activeId={state.conversationId}
               refreshVersion={historyVersion}
               onSelect={(conversationId) => navigate(`/chat/${conversationId}`)}
@@ -252,7 +255,7 @@ export function ChatPanel() {
                     )}
                   </div>
                   <div
-                    className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-4 py-3 text-sm leading-6 ${
+                    className={`min-w-0 max-w-[85%] break-words whitespace-pre-wrap rounded-xl px-4 py-3 text-sm leading-6 ${
                       message.role === "user"
                         ? "bg-foreground text-background"
                         : "border bg-[#fffdf8]"
@@ -294,7 +297,7 @@ export function ChatPanel() {
                   AI 内容仅供参考，实时价格与菜单请以现场为准
                 </span>
                 {isStreaming ? (
-                  <Button type="button" variant="outline" onClick={stop}>
+                  <Button type="button" variant="outline" onClick={() => { stop(); toast.info("已停止生成，可以继续发送消息") }}>
                     <Square aria-hidden="true" />
                     停止生成
                   </Button>

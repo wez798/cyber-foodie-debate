@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -120,5 +120,25 @@ describe("chat panel", () => {
     expect(screen.getByLabelText("话题")).toHaveValue("晚饭")
     expect(screen.getByText("会话：restored-conversation")).toBeInTheDocument()
     expect(screen.queryByLabelText("对话模式")).not.toBeInTheDocument()
+  })
+
+  it("does not send while Enter confirms a Chinese input composition", async () => {
+    renderChatPanel()
+    const input = screen.getByLabelText("聊天消息")
+    await userEvent.type(input, "午饭")
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true, keyCode: 229 })
+    expect(streamChatMock).not.toHaveBeenCalled()
+    expect(input).toHaveValue("午饭")
+  })
+
+  it("retains local history when starting a new guest conversation is cancelled", async () => {
+    const snapshot = JSON.stringify({ conversation_id: "guest-1", messages: [{ role: "user", content: "保留这条消息" }],
+      mode: "chat", topic: "午饭", updated_at: "2026-09-09T00:00:00Z" })
+    localStorage.setItem(CHAT_STORAGE_KEY, snapshot)
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+    renderChatPanel()
+    await userEvent.click(screen.getByRole("button", { name: "新对话" }))
+    expect(screen.getByText("保留这条消息")).toBeInTheDocument()
+    expect(localStorage.getItem(CHAT_STORAGE_KEY)).toBe(snapshot)
   })
 })
