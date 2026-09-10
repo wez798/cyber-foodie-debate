@@ -42,7 +42,7 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
-    command: ["sh", "-c", "alembic upgrade head && python -m src.backend.main"]
+    command: ["sh", "-c", "python -m alembic upgrade head && python -m src.backend.main"]
     depends_on:
       db:
         condition: service_healthy
