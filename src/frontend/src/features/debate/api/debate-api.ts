@@ -6,6 +6,7 @@ import type {
   DebateStreamEvent,
   ResultData,
   RoundData,
+  RoundDeltaData,
   SessionStartData,
 } from "@/types/debate"
 
@@ -54,6 +55,13 @@ const resultDataSchema: z.ZodType<ResultData> = z.object({
   result: debateResultSchema,
 })
 
+const roundDeltaSchema: z.ZodType<RoundDeltaData> = z.object({
+  round_number: z.number().int().min(1),
+  speaker: agentPersonaSchema,
+  side: z.enum(["agent_a", "agent_b"]),
+  delta: z.string().min(1),
+})
+
 const debateStreamErrorSchema: z.ZodType<DebateStreamErrorData> = z.object({
   session_id: z.string().min(1),
   status: z.enum(["failed", "timeout"]),
@@ -91,6 +99,8 @@ function decodeDebateEvent(message: ServerSentEvent): DebateStreamEvent | null {
         return { event: "session_start", data: sessionStartSchema.parse(payload) }
       case "round":
         return { event: "round", data: roundDataSchema.parse(payload) }
+      case "round_delta":
+        return { event: "round_delta", data: roundDeltaSchema.parse(payload) }
       case "result":
         return { event: "result", data: resultDataSchema.parse(payload) }
       case "error":
@@ -144,12 +154,13 @@ export async function streamDebate(
           throw new Error("辩论流返回了不匹配的会话 ID")
         }
       }
-      if (event.event === "round") {
+      if (event.event === "round" || event.event === "round_delta") {
         const expectedSpeaker =
           event.data.side === "agent_a"
             ? request.agent_a_persona
             : request.agent_b_persona
-        if (event.data.round.speaker !== expectedSpeaker) {
+        const speaker = event.event === "round" ? event.data.round.speaker : event.data.speaker
+        if (speaker !== expectedSpeaker) {
           throw new Error("辩论轮次的发言方与角色不匹配")
         }
       }

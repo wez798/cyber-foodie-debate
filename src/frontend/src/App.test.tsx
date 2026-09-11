@@ -72,6 +72,36 @@ describe("Cyber Foodie Debate app", () => {
     streamDebateMock.mockReset()
   })
 
+  it("renders incremental speech before completion without duplicating the round", async () => {
+    let emit: ((event: DebateStreamEvent) => void) | undefined
+    let finish: (() => void) | undefined
+    streamDebateMock.mockImplementation(async (_request, options) => {
+      emit = options.onEvent
+      options.onOpen?.()
+      options.onEvent({ event: "session_start", data: { session_id: "session-1", status: "running" } })
+      await new Promise<void>((resolve) => { finish = resolve })
+      return completedResult
+    })
+    render(<App />)
+    const user = await fillRequiredFields()
+    await user.click(screen.getByRole("button", { name: "开始三轮辩论" }))
+    const delta = { round_number: 1, speaker: "sichuan_spicy" as const, side: "agent_a" as const }
+    act(() => emit?.({ event: "round_delta", data: { ...delta, delta: "推荐" } }))
+    expect(screen.getByText("推荐")).toBeInTheDocument()
+    expect(screen.getByText("0 / 6 条发言")).toBeInTheDocument()
+    expect(screen.getByText("发言中")).toBeInTheDocument()
+    act(() => emit?.({ event: "round_delta", data: { ...delta, delta: "番茄鸡蛋面。" } }))
+    expect(screen.getByText("推荐番茄鸡蛋面。")).toBeInTheDocument()
+    act(() => emit?.({ event: "round", data: { side: "agent_a", round: { round_number: 1, speaker: "sichuan_spicy", content: "推荐番茄鸡蛋面。" } } }))
+    expect(screen.getAllByText("推荐番茄鸡蛋面。")).toHaveLength(1)
+    expect(screen.getByText("1 / 6 条发言")).toBeInTheDocument()
+    expect(screen.queryByText("发言中")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "取消" }))
+    act(() => emit?.({ event: "round_delta", data: { ...delta, delta: "迟到内容" } }))
+    expect(screen.queryByText("迟到内容")).not.toBeInTheDocument()
+    await act(async () => finish?.())
+  })
+
   it("switches between separate chat and debate pages", async () => {
     window.history.replaceState(null, "", "/chat")
     render(<App />)

@@ -18,10 +18,11 @@ const phaseCopy = {
 }
 
 export function DebateArena({ state }: DebateArenaProps) {
-  const spicyRounds = state.rounds.filter(
+  const visibleRounds = state.pendingRound ? [...state.rounds, state.pendingRound] : state.rounds
+  const spicyRounds = visibleRounds.filter(
     (round) => round.speaker === "sichuan_spicy",
   )
-  const freshRounds = state.rounds.filter(
+  const freshRounds = visibleRounds.filter(
     (round) => round.speaker === "cantonese_healthy",
   )
   const progress = Math.min(100, (state.rounds.length / 6) * 100)

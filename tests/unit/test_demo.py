@@ -28,7 +28,7 @@ def test_demo_debate_and_audio_are_explicit_fixtures(monkeypatch, tts_fail):
         )
         if tts_fail:
             assert audio.status_code == 500
-            assert "模拟语音服务失败" in audio.json()["detail"]
+            assert audio.json()["detail"] == "语音合成服务异常，请稍后重试"
         else:
             assert audio.status_code == 200
             assert audio.headers["content-type"] == "audio/wav"

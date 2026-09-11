@@ -58,6 +58,30 @@ afterEach(() => {
 })
 
 describe("streamDebate", () => {
+  it("delivers deltas while the response remains open", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)))
+    let firstDelta!: () => void
+    const received = new Promise<void>((resolve) => { firstDelta = resolve })
+    const onEvent = vi.fn((value) => { if (value.event === "round_delta") firstDelta() })
+    const pending = streamDebate(request, { signal: new AbortController().signal, onEvent })
+    const data = { round_number: 1, speaker: "sichuan_spicy", side: "agent_a", delta: "麻辣" }
+    controller.enqueue(encoder.encode(event("session_start", { session_id: "session-1", status: "running" }) + event("round_delta", data)))
+    await received
+    expect(onEvent).toHaveBeenLastCalledWith({ event: "round_delta", data })
+    controller.enqueue(encoder.encode(event("result", result)))
+    controller.close()
+    await expect(pending).resolves.toEqual(result)
+  })
+
+  it("rejects malformed incremental speech", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(
+      event("session_start", { session_id: "session-1", status: "running" }) +
+      event("round_delta", { round_number: 0, speaker: "sichuan_spicy", side: "agent_a", delta: "" }),
+    )))
+    await expect(streamDebate(request, { signal: new AbortController().signal, onEvent: vi.fn() })).rejects.toThrow("round_delta 事件数据格式无效")
+  })
   it("resolves only after a valid result event", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       streamResponse(

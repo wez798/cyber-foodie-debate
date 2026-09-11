@@ -2,27 +2,10 @@
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from ..services.tts_service import tts_service
+from ..models import TTSRequest
+from ..services.tts_service import TTSServiceError, tts_service
 
 router = APIRouter()
-
-
-class TTSRequest(BaseModel):
-    """TTS 合成请求。"""
-
-    text: str = Field(..., description="待合成文本", min_length=1, max_length=2000)
-    voice: str | None = Field(None, description="语音角色，默认使用配置值")
-    rate: str | None = Field(None, description="语速，如 +10%")
-    pitch: str | None = Field(None, description="音调，如 +5Hz")
-
-
-class TTSResponse(BaseModel):
-    """TTS 合成响应。"""
-
-    status: str
-    audio_format: str = "mp3"
-    message: str
 
 
 @router.post("/tts/synthesize")
@@ -40,8 +23,12 @@ async def synthesize_speech(request: TTSRequest):
             media_type="audio/mpeg",
             headers={"Content-Disposition": "inline; filename=speech.mp3"},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS 合成失败: {str(e)}")
+    except TTSServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=500, detail="语音合成服务异常，请稍后重试"
+        ) from error
 
 
 @router.post("/tts/synthesize-debate-result")
@@ -72,5 +59,9 @@ async def synthesize_debate_result(session_id: str):
             media_type="audio/mpeg",
             headers={"Content-Disposition": "inline; filename=debate_result.mp3"},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS 合成失败: {str(e)}")
+    except TTSServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=500, detail="语音合成服务异常，请稍后重试"
+        ) from error

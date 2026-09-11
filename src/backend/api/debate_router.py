@@ -12,6 +12,7 @@ from ..models import (
     DebateResponse,
     DebateResultData,
     DebateRoundData,
+    DebateRoundDeltaData,
     DebateSessionStartData,
     DebateStatus,
     DebateStreamErrorData,
@@ -69,6 +70,8 @@ async def start_debate_stream(
                     event_name = "session_start"
                 elif isinstance(update, DebateRoundData):
                     event_name = "round"
+                elif isinstance(update, DebateRoundDeltaData):
+                    event_name = "round_delta"
                 elif isinstance(update, DebateResultData):
                     event_name = "result"
                 else:

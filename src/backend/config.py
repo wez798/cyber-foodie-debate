@@ -1,6 +1,6 @@
 """Application configuration using Pydantic Settings."""
 
-from pydantic import Field, field_validator
+from pydantic import Field, HttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
     tts_rate: str = "+0%"
     tts_pitch: str = "+0Hz"
+    tts_proxy: HttpUrl | None = None
+    tts_timeout_seconds: float = Field(default=30, gt=0, le=120)
+
+    @field_validator("tts_proxy", mode="before")
+    @classmethod
+    def empty_tts_proxy(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     # 应用配置
     app_host: str = "0.0.0.0"
