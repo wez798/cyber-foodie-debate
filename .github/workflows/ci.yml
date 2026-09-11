@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   lint:
@@ -21,21 +21,38 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pytest
+          pip install -r requirements.txt
 
       - name: Ruff linting
-        run: ruff check src/ tests/ || true
+        run: ruff check src/ tests/ scripts/
 
       - name: Ruff formatting check
-        run: ruff format --check src/ tests/ || true
+        run: ruff format --check src/ tests/ scripts/
 
       - name: Type checking
-        run: mypy src/ --ignore-missing-imports || true
+        run: mypy src/ --ignore-missing-imports
 
   test:
     name: Unit & BDD Tests
     runs-on: ubuntu-latest
     needs: lint
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cyber_foodie_test
+          POSTGRES_USER: cyber_foodie
+          POSTGRES_PASSWORD: cyber_foodie_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cyber_foodie -d cyber_foodie_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://cyber_foodie:cyber_foodie_test@127.0.0.1:5432/cyber_foodie_test
+      TEST_DATABASE_URL: postgresql+asyncpg://cyber_foodie:cyber_foodie_test@127.0.0.1:5432/cyber_foodie_test
     steps:
       - uses: actions/checkout@v4
 
@@ -49,11 +66,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Check migration/model parity
+        run: alembic check
+
       - name: Run unit tests
-        run: pytest tests/unit/ -v --cov=src --cov-report=xml || true
+        run: python -m pytest tests/unit/ -v --cov=src --cov-report=xml
+
+      - name: Run database integration tests
+        run: python -m pytest tests/integration/ -v
 
       - name: Run BDD tests
-        run: behave tests/bdd/ --format pretty || true
+        run: behave tests/bdd/ --format pretty
 
       - name: Upload coverage
         if: always()
@@ -63,12 +89,46 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
-  docker-build:
-    name: Docker Build Check
+  frontend:
+    name: Frontend Quality Check
     runs-on: ubuntu-latest
-    needs: test
+    defaults:
+      run:
+        working-directory: src/frontend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build -t cyber-foodie-debate .
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm with Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: corepack pnpm test
+
+      - name: Type check frontend
+        run: corepack pnpm typecheck
+
+      - name: Build frontend
+        run: corepack pnpm build
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    needs: [test, frontend]
+    env:
+      POSTGRES_PASSWORD: ci-only-compose-validation
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build Docker images
+        run: docker compose build

@@ -1,6 +1,7 @@
 # 系统架构设计规约 — Cyber Foodie Debate
 
-> 系统级三大模型（6大架构图）
+> 当前基线：React 19 + TypeScript + Vite 前端，FastAPI + Pydantic v2 后端。
+> 本文描述当前已实现的运行时边界，包括第一方认证与 PostgreSQL 云端对话持久化。
 
 ---
 
@@ -11,50 +12,86 @@
 ```mermaid
 graph LR
     subgraph 参与者
-        U[("👤 大学生用户")]
-        LLM_API[("🤖 硅基流动 LLM API")]
-        TTS_API[("🔊 微软 TTS API")]
+        U[大学生用户]
+        LLM_API[硅基流动 LLM API]
+        TTS_API[微软 TTS API]
     end
 
-    subgraph 系统边界 [Cyber Foodie Debate 系统]
-        UC1[输入饮食偏好]
-        UC2[启动AI辩论赛]
-        UC3[观看辩论实况]
-        UC4[查看推荐结果]
-        UC5[语音播报结果]
-        UC6[查看历史辩论]
+    subgraph 系统边界 [Cyber Foodie Debate]
+        UC1[自由聊天与干饭推荐]
+        UC2[输入饮食偏好]
+        UC3[启动三轮 AI 辩论]
+        UC4[观看 POST SSE 实况]
+        UC5[查看裁决与推荐]
+        UC6[播放语音战报]
+        UC7[恢复浏览器最近对话]
+        UC8[注册 / 登录 / 退出]
+        UC9[跨设备恢复云端对话]
     end
 
     U --> UC1
     U --> UC2
     U --> UC3
     U --> UC4
-    UC2 -.调用.-> LLM_API
-    UC5 -.调用.-> TTS_API
+    U --> UC5
+    U --> UC6
+    U --> UC7
+    U --> UC8
+    U --> UC9
+    UC1 -.调用.-> LLM_API
+    UC3 -.调用.-> LLM_API
+    UC6 -.调用.-> TTS_API
     UC2 --> UC3
-    UC2 --> UC4
+    UC3 --> UC4
+    UC4 --> UC5
 ```
 
 ### 2. 系统数据流图 (DFD)
 
 ```mermaid
-graph LR
-    A[("用户输入<br/>口味/预算/天气/忌口")] --> B[偏好校验<br/>Pydantic Schema]
-    B --> C[辩论编排服务<br/>DebateService]
-    C --> D[LLM API<br/>DeepSeek-V4-Flash]
-    D --> E[辩论回合生成<br/>Agent A/B 轮流发言]
-    E --> F[主持人判定<br/>结果聚合]
-    F --> G[辩论结果<br/>JSON Response]
-    G --> H[前端渲染展示]
-    F -.Sprint3.-> I[TTS API<br/>edge-tts]
-    I --> J[语音播报]
+graph TB
+    U[用户浏览器] --> R[React App]
+    R --> SW[页面选择器 /chat 与 /debate]
+
+    SW --> CHAT[自由聊 feature]
+    CHAT --> CR[ChatRequest]
+    CR -->|POST /api/chat/stream| CAR[Chat Router]
+    CAR --> CS[ChatService]
+    CS --> LLM[LLMService]
+    LLM --> SF[SiliconFlow API]
+    SF --> LLM
+    LLM --> CS
+    CS --> CAR
+    CAR -->|start / delta / done / error| CHAT
+    CHAT --> LS[localStorage 最近对话]
+    CHAT -->|登录用户 POST SSE| PCR[Conversation Router]
+    PCR --> PCS[ConversationService]
+    PCS --> PR[ConversationRepository]
+    PR --> PG[(PostgreSQL)]
+    R -->|认证 / Session / CSRF| AR[Auth Router]
+    AR --> AS[AuthService]
+    AS --> ARepo[AuthRepository]
+    ARepo --> PG
+
+    SW --> DEBATE[辩论 feature]
+    DEBATE --> DR[DebateRequest]
+    DR -->|POST /api/v1/debate/start-stream| DAR[Debate Router]
+    DAR --> DS[DebateService]
+    DS --> LLM
+    DS --> MEM[内存 DebateSession]
+    DAR -->|session_start / round_delta / round / result / error| DEBATE
+    DEBATE -->|POST 合成结果| TTS[TTSService]
+    TTS --> EDGE[edge-tts]
 ```
+
+前端只持有公开的后端地址。`SILICONFLOW_API_KEY` 仅由 FastAPI 服务读取，不得放入
+任何会被 Vite 打包进浏览器的 `VITE_*` 环境变量。
 
 ---
 
-## 二、数据模型 (Data Model)
+## 二、数据与模块模型 (Data and Module Model)
 
-### 3. 系统领域类图 (Domain Class Diagram)
+### 3. 核心领域类图 (Domain Class Diagram)
 
 ```mermaid
 classDiagram
@@ -66,50 +103,74 @@ classDiagram
         +str 其他要求
     }
 
-    class AgentPersona {
-        <<enumeration>>
-        SICHUAN_SPICY
-        CANTONESE_HEALTHY
-        CUSTOM
-    }
-
-    class DebateRound {
-        +int round_number
-        +AgentPersona speaker
-        +str content
-        +str reasoning
-    }
-
-    class DebateResult {
-        +AgentPersona winner
-        +str recommendation
-        +str dish_name
-        +str restaurant_suggestion
-        +float confidence
-    }
-
     class DebateSession {
         +str session_id
         +FoodPreference preference
-        +AgentPersona agent_a_persona
-        +AgentPersona agent_b_persona
         +list~DebateRound~ rounds
         +DebateResult result
         +DebateStatus status
     }
 
+    class ChatRequest {
+        +str conversation_id
+        +list~ChatMessage~ messages
+        +ChatMode mode
+        +str topic
+        +dict metadata
+    }
+
+    class ChatResponse {
+        +str conversation_id
+        +ChatMessage message
+        +str finish_reason
+    }
+
+    class ChatService {
+        +complete() ChatResponse
+        +stream_reply() AsyncIterator
+    }
+
     class DebateService {
         +dict sessions
         +start_debate() DebateResponse
-        +_generate_argument() DebateRound
+        +_stream_argument() AsyncGenerator
         +_judge_debate() DebateResult
     }
 
     class LLMService {
-        +str base_url
-        +str api_key
+        +complete() LLMCompletion
+        +stream() AsyncIterator
         +chat_completion() dict
         +health_check() bool
+    }
+
+    class UseChat {
+        +ChatViewState state
+        +send()
+        +stop()
+        +reset()
+    }
+
+    class ConversationService {
+        +create() ConversationResponse
+        +messages() MessagePage
+        +prepare_generation() PreparedGeneration
+        +stream_generation() AsyncIterator
+    }
+
+    class AuthService {
+        +register() IssuedSession
+        +login() IssuedSession
+        +authenticate() CurrentSession
+        +logout()
+    }
+
+    class UseDebate {
+        +DebateViewState state
+        +start()
+        +retry()
+        +cancel()
+        +playResult()
     }
 
     DebateSession "1" --> "*" DebateRound
@@ -117,104 +178,227 @@ classDiagram
     DebateSession "1" --> "1" FoodPreference
     DebateService --> DebateSession : manages
     DebateService --> LLMService : calls
+    ChatService --> LLMService : calls
+    ChatService --> ChatRequest : validates input
+    ChatService --> ChatResponse : returns
+    UseChat --> ChatRequest : sends
+    ConversationService --> ChatService : delegates LLM generation
+    AuthService --> User : authenticates
+    UseDebate --> FoodPreference : collects
 ```
 
-### 4. 数据库实体关系图 (ER Diagram)
+后端 HTTP 输入和输出以 `src/backend/models.py` 中的 Pydantic Schema 为准；前端
+对应类型位于 `src/frontend/src/types/`。接口变更必须同步修改两端类型和测试。
+
+### 4. 当前存储模型 (Storage Model)
 
 ```mermaid
-erDiagram
-    DEBATE_SESSION ||--o{ DEBATE_ROUND : contains
-    DEBATE_SESSION ||--o| DEBATE_RESULT : produces
-    DEBATE_SESSION {
-        string session_id PK
-        string preference_json
-        string agent_a_persona
-        string agent_b_persona
-        string status
-        datetime created_at
-        datetime completed_at
-    }
-    DEBATE_ROUND {
-        int round_number
-        string speaker
-        text content
-        string session_id FK
-    }
-    DEBATE_RESULT {
-        string session_id FK
-        string winner
-        string dish_name
-        string restaurant_suggestion
-        float confidence
-    }
+graph LR
+    subgraph 浏览器
+        GUEST[游客 ChatViewState] <--> LOCAL[(localStorage)]
+        CLOUD[登录用户 ChatViewState]
+        COOKIE[HttpOnly Session + CSRF Cookie]
+    end
+
+    CLOUD --> API[FastAPI]
+    COOKIE --> API
+    API --> DB[(PostgreSQL<br/>users / auth_sessions / conversations / messages)]
+    API --> SESSIONS[(内存 DebateSession)]
 ```
+
+- 游客自由聊只保存最近一次浏览器会话；登录用户的会话和消息写入 PostgreSQL。
+- 云端消息使用 `(conversation_id, sequence_no)` 排序并通过游标分页；前端恢复时仅请求最近 50 条。
+- 认证使用 Argon2id 密码哈希和可撤销不透明 Session；数据库只存 Session/CSRF 哈希。
+- 每个会话最多一个 `generating` 助手消息，唯一约束负责多实例并发互斥；失败、取消和过期生成均落终态。
+- 辩论会话仍只保存在当前 FastAPI 进程内存中，进程重启后丢失。
 
 ---
 
-## 三、动态/行为模型 (Dynamic Model)
+## 三、动态与行为模型 (Dynamic Model)
 
-### 5. 端到端核心时序图 (System Sequence Diagram)
+### 5. 端到端流式时序图 (System Sequence Diagram)
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户浏览器
-    participant API as FastAPI Server
-    participant DS as DebateService
-    participant LLM as 硅基流动 LLM
-    participant TTS as 微软 TTS
+    participant U as 用户
+    participant FE as React 前端
+    participant API as FastAPI
+    participant SVC as ChatService / DebateService
+    participant LLM as SiliconFlow
+    participant TTS as edge-tts
 
-    U->>API: POST /api/v1/debate/start
-    API->>API: Pydantic 校验 FoodPreference
-    API->>DS: start_debate(request)
-    DS->>DS: 创建 DebateSession
-
-    loop 每轮辩论 (max_rounds=3)
-        DS->>LLM: chat_completion(Agent A Prompt)
-        LLM-->>DS: Agent A 发言内容
-        DS->>LLM: chat_completion(Agent B Prompt)
-        LLM-->>DS: Agent B 发言内容
-    end
-
-    DS->>LLM: chat_completion(主持人判定 Prompt)
-    LLM-->>DS: 辩论结果 JSON
-    DS->>DS: 解析结果 → DebateResult
-    DS-->>API: DebateResponse
-    API-->>U: JSON Response
-
-    opt Sprint 3: TTS 语音播报
-        U->>API: GET /api/v1/tts/synthesize
-        API->>TTS: edge-tts 合成
-        TTS-->>API: 音频流
-        API-->>U: 音频播放
+    alt 自由聊
+        U->>FE: 输入消息并发送
+        FE->>API: 游客 POST /api/chat/stream<br/>登录用户 POST /api/v1/conversations/{id}/messages/stream
+        API->>SVC: 校验并组装可信 Prompt
+        SVC->>LLM: 流式 Chat Completions
+        API-->>FE: start
+        loop 文本增量
+            LLM-->>API: delta
+            API-->>FE: delta
+        end
+        API-->>FE: done 或 error
+        FE->>FE: 更新 UI
+        opt 游客
+            FE->>FE: 写入 localStorage
+        end
+        opt 登录用户
+            API->>API: 原子写入用户消息与生成终态
+        end
+    else 三轮辩论
+        U->>FE: 提交 FoodPreference
+        FE->>API: POST /api/v1/debate/start-stream
+        API->>SVC: 创建内存 DebateSession
+        API-->>FE: session_start
+        loop 3 轮、每轮双方发言
+            SVC->>LLM: 生成 Agent 发言
+            LLM-->>SVC: 发言内容
+            API-->>FE: round
+        end
+        SVC->>LLM: 主持人裁决
+        LLM-->>SVC: 结构化结果
+        API-->>FE: result
+        opt 播放语音战报
+            FE->>API: POST /api/v1/tts/synthesize-debate-result
+            API->>TTS: 合成音频
+            TTS-->>FE: audio/mpeg
+        end
     end
 ```
 
-### 6. 系统生命周期状态机图 (State Diagram)
+### 6. 前端交互状态机图 (State Diagram)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : 创建会话
-
-    PENDING --> RUNNING : 提交辩论请求
-
-    RUNNING --> ROUND_1 : 第1轮开始
-    ROUND_1 --> ROUND_2 : Agent A/B 发言完成
-    ROUND_2 --> ROUND_3 : Agent A/B 发言完成
-    ROUND_3 --> JUDGING : 第3轮结束
-
-    ROUND_1 --> TIMEOUT : 超时/异常
-    ROUND_2 --> TIMEOUT : 超时/异常
-    ROUND_3 --> TIMEOUT : 超时/异常
-
-    JUDGING --> COMPLETED : 主持人判定完成
-    TIMEOUT --> COMPLETED : 返回部分结果
-
-    COMPLETED --> [*]
-
-    state RUNNING {
-        [*] --> ROUND_1
-        ROUND_1 --> ROUND_2
-        ROUND_2 --> ROUND_3
-        ROUND_3 --> JUDGING
-    }
+    [*] --> IDLE
+    IDLE --> SUBMITTING : 提交辩论偏好
+    SUBMITTING --> STREAMING : 收到响应头
+    SUBMITTING --> ERROR : HTTP/网络错误
+    STREAMING --> STREAMING : session_start / round_delta / round
+    STREAMING --> COMPLETED : 收到并校验 completed/result
+    STREAMING --> ERROR : SSE error、整体超时或提前结束
+    SUBMITTING --> IDLE : 取消
+    STREAMING --> IDLE : 取消
+    ERROR --> SUBMITTING : 重试
+    COMPLETED --> IDLE : 再来一场
 ```
+
+自由聊使用更小的 `idle -> streaming -> idle/error` 状态集。两个 feature 分别维护
+状态，页面切换由 History API 驱动；生产静态服务器必须将 `/chat` 和 `/debate`
+回退到 `index.html`。
+
+---
+
+## 四、开发与部署边界
+
+### 用户确认导入的事务与幂等
+
+云端浏览：`GET /conversations/{id}/messages?limit=50&cursor=...` 返回按 sequence_no 正序的
+最近一页及 next_cursor。后端 limit 范围仍为 1–100、默认 50，查询使用稳定序号边界。
+前端不自动遍历游标；顶部按钮按次请求更早一页。只有校验和合并成功后才推进游标；
+失败、重复/循环游标、无进展页、错误会话 ID 或冲突序号都保留已显示内容和原游标。
+同 ID 去重、按序号排序；已完成的本地云端记录优先于迟到历史页中的旧内容。
+初始加载、加载更早、SSE 生成分别维护状态与 AbortController，历史加载不提供停止生成。
+切换用户、会话或卸载时取消旧请求。SSE 待生成消息与持久化历史独立保存，完成时按 ID 合并，
+不使用发送前的历史数组覆盖新加载页。更早页到达后按可见消息 ID 恢复滚动位置。
+
+前端 `LocalChatImport` 按 user ID 挂载并隔离状态。点击时捕获完整快照，使用
+SHA-256(user ID + 本地会话 ID/模式/话题/更新时间/有序消息) 作为请求 ID；相同快照刷新后稳定，
+不同用户及修订互不串用，不在浏览器新增认证数据。预览为纯文本且不发出正文网络请求。
+POST 必须包含 `expected_user_id`（UUID），表示用户确认时的账号；服务端经过认证、Origin、
+CSRF 校验后，写入前与认证 user ID 比对。不一致返回 `409 auth_identity_changed`，缺失返回 422，
+不会进入导入服务。owner 始终取自服务端认证；该前置条件不参与原始内容指纹。
+登录、注册、退出通过 localStorage 的随机 revision 通知其他标签页重新认证，事件不包含
+用户资料、密码、Session/CSRF Token 或聊天正文。身份事件立即取消旧导入、分页和 SSE；
+请求还比较仅保留在内存中的 CSRF Cookie 值与 revision，检测事件尚未送达的会话切换。
+身份不明或变化时保留副本并提示重新确认，旧响应不导航、不清理、不更新新账号状态。
+POST 后分别读取最近一页供聊天展示，以及调用 `POST /conversations/{id}/import/verify`
+核对原始记录。核对请求使用相同的 `ConfirmedImportRequest`，同样经过认证、Origin、CSRF 和
+expected_user_id 校验。先检查归属、原始 import_request_id 与不可变指纹，再仅查询序号
+1–N（N 为原始快照条数，最多 50，SQL LIMIT N），逐条比较角色、正文、来源及完成状态。
+响应 `ImportVerificationResponse` 包含 conversation_id、import_request_id、items（1–50 条原始消息）；
+客户端复核这些字段及全部原始内容。核对不读取后续历史，也不随追加消息、改名而失效。
+每次导入后最多 1 次核对（至多 50 条）和 1 次最近页读取（至多 50 条），不自动遍历游标。
+指纹/请求 ID 不匹配返回 `409 import_conflict`，原始消息损坏返回 `409 import_verification_failed`；
+未归属或已软删除的会话核对返回 404。重放导入的软删除语义仍是 `409 import_deleted`。
+清理与游客存储写入共享 Web Locks，锁内再次检查会话变化和完整快照再移除，变化、存储失败
+或不支持锁时保留。正确账号下已经提交但随后切换账号的导入无需撤销，可保留副本安全重试。
+storage/custom event 同步当前游客内存；卸载及用户切换 abort，所有异步阶段检查取消信号。
+
+`POST /api/v1/conversations/import` 沿 API → Service → Repository → Database 调用；
+Router 复用登录、Origin、CSRF 依赖。请求模型在 `models.py`，限制见 README。
+Service 对规范化 topic 和有序 messages 的确定性 JSON（键排序、无额外空格、UTF-8）
+计算 SHA-256，不含预期账号、客户端请求 ID、服务端 ID 或时间。仅 topic 去首尾空白、空值转 null，
+正文保留原始内容。
+
+选择在 conversations 增加可空 `import_request_id`、`import_fingerprint`，以最小表结构
+复用既有软删除生命周期；唯一约束 `uq_conversations_owner_import(user_id, import_request_id)`
+保证并发最多一份。历史会话两个字段均为 null。新增迁移 `20260908_0002`，不修改旧迁移。
+Repository 同事务创建会话和全部消息，先 flush 父记录再批量写消息，失败整体 rollback；
+唯一冲突回滚后按用户及导入 ID 读取胜出事务结果。指纹只在初始导入写入，改名或追加不改它。
+相同内容重放返回原会话；不同内容 `409 import_conflict`；软删除 `409 import_deleted`。
+
+会话固定 chat、标题确定性截取首条 user 正文；消息编号从 1 连续递增，source 为
+client_import、status 为 complete，时间为服务端带时区 UTC。导入无需配置或调用外部服务。
+导入的两种角色仍是不可信历史；后续生成只由服务端模板创建 system 指令。
+
+- Vite 开发服务器默认监听 `127.0.0.1:5173`。
+- FastAPI 默认监听 `0.0.0.0:8000`，Swagger UI 位于 `/docs`。
+- 辩论、认证和云端会话 API 默认前缀为 `/api/v1`，游客聊天 API 默认前缀为 `/api`。
+- 浏览器通过 `VITE_API_BASE_URL` 和 `VITE_CHAT_API_BASE_URL` 覆盖后端地址。
+- 根目录 `Dockerfile` 构建 FastAPI 后端，`src/frontend/Dockerfile` 通过 pnpm 构建
+  Vite 产物并交给 Nginx 托管。
+- 容器前端使用相对 `/api` 地址，由 Nginx 反向代理后端，并为 History API 路由提供
+  `index.html` 回退。
+- `FRONTEND_ORIGINS` 是允许携带凭据的浏览器来源 JSON 数组；HTTPS 部署必须同时设置
+  `SESSION_COOKIE_SECURE=true`。Compose 从 `.env` 透传二者。
+- Nginx 对登录/注册和其余 `/api/` 请求分别按客户端 IP 限流。
+- Docker 后端健康检查访问 `/health/ready`（数据库连接），前端访问 `/healthz`；`/health/live` 只表示后端存活。均不调用 LLM/TTS；`/api/v1/health` 会主动探测外部服务。
+- `DebateService` 对完整辩论设置整体超时；失败、超时和取消不会生成兜底成功结果。
+- `LLMService` 同时限制进程内并发和每分钟上游调用数，超过本地频率限制时快速返回 429。
+
+### 最终交付边界
+
+页头账户入口复用既有认证状态，历史列表提供“最近会话”和“已归档”。归档筛选复用 `include_archived=true` 的分页响应并在当前累计页中过滤；恢复发送 `{ "archived": false }`，不新增实体或接口。每次主动加载至多一页，切换筛选、账号或卸载取消旧请求；操作完成后先验证认证状态，不能关闭用户后来选择的另一会话。
+
+中文组合输入 Enter 不提交；游客新会话需确认清除，取消辩论后忽略迟到事件。语音失败保留裁决，播放可以重试。辩论为单进程内存数据，不提供刷新恢复或持久化。
+
+`scripts/run_demo.py` 是交付验收工具，不进入生产镜像：新建临时 SQLite、执行现有迁移，覆盖聊天/辩论与 TTS 外部依赖，使用独立 Cookie、绑定回环地址。文本标记为固定样例，音频为生成的 WAV 测试音；不声称模型或语音服务成功。正常启动路径不启用这些替身。
+
+Compose 在服务启动前通过 `python -m alembic upgrade head` 执行迁移，不依赖运行镜像未复制的 CLI 入口。Nginx `try_files $uri $uri/ /index.html` 覆盖所有前端深链接；真实容器启动与路由回退验收结果以 [final-delivery.md](final-delivery.md) 为准。
+
+
+### 辩论实时发言协议与时限
+
+`POST /api/v1/debate/start-stream` 返回 POST SSE。事件顺序为
+`session_start → (round_delta* → round) × 双方轮数 → result`；失败返回终止 `error`，
+不会补发成功结果。`round` 保持原有结构，表示一条发言已完成。
+
+新增 `round_delta` 数据示例：
+
+```json
+{"round_number":1,"speaker":"sichuan_spicy","side":"agent_a","delta":"推荐番茄鸡蛋面。"}
+```
+
+增量经过 Pydantic 校验；浏览器以轮次与角色拼接当前发言，收到 `round` 后替换为完整内容，
+仅完整发言计入进度。取消会关闭上游流；未收到模型结束标志的断流不会保存为完整发言，
+也不会自动重放。客户端仍校验错误、取消及缺少终止结果的提前结束。
+
+每次发言与裁决各有 30 秒生成时限（包括排队与重试），默认整场预算取
+`max(DEBATE_TIMEOUT_SECONDS, (2 × max_rounds + 1) × 30)` 秒，三轮至少 210 秒，
+避免原来七次串行生成挤在 60 秒内。构造服务时显式传入 `timeout_seconds` 仍可设置更短的整场硬上限。
+
+发言提示要求 2–3 句、60–100 字，上限 240 tokens；裁决理由要求 40–60 字，
+整个 JSON 上限 320 tokens。字数是生成目标，token 上限是硬限制。
+辩论发言与裁决显式传入 `enable_thinking=false`，自由聊天维持原参数默认值。
+参数依据：[硅基流动 Chat Completions API](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
+
+### TTS 错误契约与配置
+
+`POST /api/v1/tts/synthesize` 与 `POST /api/v1/tts/synthesize-debate-result`
+成功时仍返回 `audio/mpeg`；失败统一返回 `{"detail":"安全的可读错误信息"}`。
+上游拒绝连接/网络失败返回 503，整体超时返回 504，空音频或协议异常返回 502，
+无效输入返回 422，未知内部异常返回 500，不再向浏览器透传原始异常 URL。
+`TTSRequest` / `TTSResponse` 定义归入 `src/backend/models.py`；现有前端按 `detail`
+展示错误，无需修改 TypeScript 请求或响应结构。
+依赖升级为 `edge-tts==7.2.8`，配置与手动检查步骤见 [TTS 排查指南](tts-troubleshooting.md)。

@@ -1,15 +1,15 @@
 """Unit tests for Pydantic models."""
 
 import pytest
+from pydantic import ValidationError
+
 from src.backend.models import (
-    FoodPreference,
+    AgentPersona,
+    ChatRequest,
+    DebateRequest,
     DebateRound,
     DebateResult,
-    DebateSession,
-    DebateRequest,
-    DebateResponse,
-    DebateStatus,
-    AgentPersona,
+    FoodPreference,
     HealthCheck,
 )
 
@@ -32,6 +32,23 @@ class TestFoodPreference:
         )
         assert pref.天气 == "雨天"
         assert pref.忌口 == "不吃香菜"
+
+    def test_required_fields_reject_whitespace(self):
+        with pytest.raises(ValidationError):
+            FoodPreference(口味="   ", 预算="10-20元")
+
+    def test_optional_blank_fields_are_normalized(self):
+        pref = FoodPreference(口味=" 清淡 ", 预算=" 10-20元 ", 忌口="   ")
+
+        assert pref.口味 == "清淡"
+        assert pref.预算 == "10-20元"
+        assert pref.忌口 is None
+
+    def test_unknown_fields_are_rejected(self):
+        with pytest.raises(ValidationError):
+            FoodPreference.model_validate(
+                {"口味": "辣", "预算": "10-20元", "内部选项": "不应接受"}
+            )
 
 
 class TestDebateRound:
@@ -92,3 +109,13 @@ class TestHealthCheck:
         assert h.status == "ok"
         assert h.version == "0.1.0"
         assert h.llm_available is False
+
+
+def test_chat_request_rejects_oversized_aggregate_context() -> None:
+    with pytest.raises(ValidationError, match="总长度"):
+        ChatRequest(
+            messages=[
+                {"role": "user", "content": str(index) + "x" * 7_999}
+                for index in range(9)
+            ]
+        )

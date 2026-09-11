@@ -1,29 +1,83 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:17-alpine
+    container_name: cyber-foodie-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cyber_foodie}
+      POSTGRES_USER: ${POSTGRES_USER:-cyber_foodie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: cyber-foodie-backend
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      - "127.0.0.1:8000:8000"
+    environment:
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      SILICONFLOW_BASE_URL: ${SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
+      SILICONFLOW_MODEL: ${SILICONFLOW_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
+      SILICONFLOW_MAX_REQUESTS_PER_MINUTE: ${SILICONFLOW_MAX_REQUESTS_PER_MINUTE:-60}
+      SILICONFLOW_MAX_CONCURRENCY: ${SILICONFLOW_MAX_CONCURRENCY:-4}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cyber_foodie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-cyber_foodie}
+      FRONTEND_ORIGINS: '${FRONTEND_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}'
+      SESSION_COOKIE_NAME: "${SESSION_COOKIE_NAME:-cfd_session}"
+      CSRF_COOKIE_NAME: "${CSRF_COOKIE_NAME:-cfd_csrf}"
+      SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-604800}"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
+      PASSWORD_MIN_LENGTH: "${PASSWORD_MIN_LENGTH:-10}"
+      DATABASE_READY_TIMEOUT_SECONDS: "${DATABASE_READY_TIMEOUT_SECONDS:-2}"
+      CLOUD_GENERATION_STALE_SECONDS: "${CLOUD_GENERATION_STALE_SECONDS:-180}"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    command: ["sh", "-c", "python -m alembic upgrade head && python -m src.backend.main"]
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 10s
 
   frontend:
-    image: nginx:alpine
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+        VITE_CHAT_API_BASE_URL: /api
+        VITE_CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:-cfd_csrf}
     container_name: cyber-foodie-frontend
     ports:
       - "3000:80"
-    volumes:
-      - ./src/frontend:/usr/share/nginx/html:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres_data:

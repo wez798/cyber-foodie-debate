@@ -4,25 +4,52 @@
 
 ## 开发环境搭建
 
+本项目需要 Python 3.11、Node.js 22.13+（或 24+）和 pnpm。
+
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/<your-org>/cyber-foodie-debate.git
+git clone https://github.com/wez798/cyber-foodie-debate.git
 cd cyber-foodie-debate
 
 # 2. 创建开发分支
 git checkout -b feature/your-feature-name
 
-# 3. 安装依赖
+# 3. 安装后端依赖
 pip install -r requirements.txt
 
 # 4. 配置环境变量
 cp .env.example .env
 # 编辑 .env 填入硅基流动 API Key
 
-# 5. 运行测试
-pytest tests/ -v
-behave tests/bdd/
+# 5. 安装前端依赖
+cd src/frontend
+pnpm install --frozen-lockfile
 ```
+
+配置专用 PostgreSQL 数据库后，先在仓库根目录执行 `python -m alembic upgrade head` 和 `python -m alembic check`，再启动后端：
+
+```bash
+python -m src.backend.main
+```
+
+另开终端启动 Vite 前端：
+
+```bash
+cd src/frontend
+pnpm dev
+```
+
+默认访问 `http://localhost:5173`。后端地址不是 `http://localhost:8000` 时，
+请在 `src/frontend/.env.local` 中配置 `VITE_API_BASE_URL` 和
+`VITE_CHAT_API_BASE_URL`，不要把密钥写入任何 `VITE_*` 变量。
+
+也可以在仓库根目录启动完整容器环境：
+
+```bash
+docker compose up --build
+```
+
+容器前端位于 `http://localhost:3000`，并通过 Nginx 的 `/api/` 代理访问后端。
 
 ## 分支模型
 
@@ -82,18 +109,79 @@ docs: 更新Sprint 2报告
 - 所有 API 接口使用 Pydantic Schema 强校验
 - 敏感信息（API Key）严禁硬编码，必须从 `.env` 读取
 - 外部 API 调用使用 `tenacity` 指数退避重试
+- TypeScript 保持 strict 模式，业务模块放在 `src/frontend/src/features/`
+- 优先复用 `src/frontend/src/components/ui/` 中的 shadcn/ui 组件
+- 浏览器端 API 契约变更必须同步更新 TypeScript 类型与测试
 
 ## 测试要求
 
-- 新增功能必须包含单元测试（pytest）
+- 后端新增功能必须包含单元测试（pytest）
+- 前端新增功能必须包含 Vitest/Testing Library 测试
 - 核心用户故事必须包含 BDD 验收测试（behave/Gherkin）
-- 提交 PR 前确保所有测试通过：`pytest tests/ -v && behave tests/bdd/`
+- 流式交互至少覆盖正常完成、错误事件、取消和响应提前结束
+
+提交 PR 前分别执行：
+
+```bash
+# 仓库根目录
+ruff check src tests scripts
+ruff format --check src tests scripts
+mypy src --ignore-missing-imports
+pytest tests/unit -v
+pytest tests/integration -v
+behave tests/bdd
+
+# src/frontend
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+BDD 和连通性测试必须隔离或显式标记真实外部服务调用，默认测试不得消耗真实 API 配额。
+需要验证真实外部服务时，单独执行 `python scripts/test_api_connectivity.py`；任一服务
+连通失败时脚本会返回非零退出码。
 
 ## 代码审查清单
+
+导入接口修改需验证未知字段、字符及数量限制、用户隔离、CSRF、原子回滚、并发幂等、
+改名/追加后的重放及软删除后的安全拒绝。`test_import_migrations.py` 自动在临时 SQLite
+文件验证空库升级、第一阶段 schema 带数据升级及 `alembic check`；不访问 `.env` 数据库。
+PostgreSQL 集成验收需将 `TEST_DATABASE_URL` 指向可销毁的专用测试库（测试会建表/清表），
+不能使用开发或生产数据。SQLite 并发测试不能替代 PostgreSQL 验收。
+前端导入测试需覆盖未确认不上传、刷新重试 ID、账号隔离、迟到响应、取消/读取失败、
+跨标签页本地内容变化及清理后的游客内存同步。测试使用 fake REST 与 Web Locks，禁止真实 LLM/TTS。
+分页测试需覆盖仅一页初始化、用户点击、失败后原游标重试、ID 去重/排序、游标循环/非法页、
+切换会话取消和 SSE/历史两种完成顺序；历史加载不能显示为正在生成或覆盖增量回复。
+手动迁移验收同样仅在一次性数据库设置 `DATABASE_URL` 后执行：
+
+```bash
+alembic upgrade head
+alembic check
+```
+
+邮件验证、密码找回和辩论持久化尚未实现，测试与文档不得宣称支持。
 
 提交 PR 前请确认：
 - [ ] 代码遵循 Angular Commit 规范
 - [ ] 无硬编码密钥/敏感信息
-- [ ] 已通过本地 `ruff check` 与 `pytest`
+- [ ] 后端 lint、类型检查、单元测试和 BDD 均通过
+- [ ] 前端测试、类型检查和生产构建均通过
+- [ ] 前后端 API 类型、SSE 事件和错误处理保持一致
+- [ ] 若修改前端路由或构建方式，已同步验证生产静态部署
 - [ ] 已更新相关文档（README/docs）
 - [ ] 至少一名组员已 Code Review
+
+## 冻结后的验收规则
+
+功能已冻结，只接受阻断修复与交付材料更新。离线浏览器演示使用 `python scripts/run_demo.py`，前端配置 `VITE_CSRF_COOKIE_NAME=cfd_demo_csrf`，详见 README；固定回复与测试提示音不能作为真实服务成功证据。
+
+集成测试运行前必须明确 `TEST_DATABASE_URL` 指向可销毁的专用数据库，默认 fixture 会执行建表和清表。请在仓库根目录运行测试，迁移用例依赖根目录 Alembic 配置。PowerShell 示例：
+
+```powershell
+$env:TEST_DATABASE_URL="sqlite+aiosqlite:///D:/temporary/cfd-tests.db"
+python -m pytest tests/integration -v
+```
+
+目录须事先存在且数据库必须专用于本次测试；PostgreSQL 验收应改用专用 PostgreSQL URL，SQLite 不替代该项。现有 fixture 还会尝试删除 `tmp/auth_chat_integration.db`，执行前确认该路径没有用户数据。不要用 `docker compose down -v` 清理共享环境。
+
+交付验收操作与预期结果见 [demo-guide.md](docs/demo-guide.md)，本轮实际结果见 [final-delivery.md](docs/final-delivery.md)。仅已执行成功的检查标记通过；Docker、真实 LLM/TTS、真实移动设备等未执行项目保留限制说明。

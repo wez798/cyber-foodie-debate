@@ -31,20 +31,24 @@ desktop.ini
 
 # Node (frontend)
 node_modules/
+.pnpm-store/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Docker
-.dockerignore
 
 # Data
 data/*.db
 data/*.json
 !data/.gitkeep
+tmp/
+
+# Local reference materials
+/*.pdf
+/*.png
 
 # Test coverage
 .coverage
+coverage.xml
 htmlcov/
 .pytest_cache/
 
