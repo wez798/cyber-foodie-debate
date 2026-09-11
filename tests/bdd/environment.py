@@ -2,12 +2,28 @@
 
 import json
 
-from src.backend.services.llm_service import LLMCompletion
+from collections.abc import AsyncGenerator
+
+from src.backend.services.llm_service import LLMStreamChunk, LLMCompletion
 from src.backend.services.debate_service import DebateService
 
 
 class FakeDebateLLM:
     """Return deterministic arguments and judgments without external I/O."""
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        enable_thinking: bool | None = None,
+    ) -> AsyncGenerator[LLMStreamChunk, None]:
+        completion = await self.complete(
+            messages, temperature=temperature, max_tokens=max_tokens
+        )
+        yield LLMStreamChunk(delta=completion.content)
+        yield LLMStreamChunk(finish_reason="stop")
 
     async def complete(
         self,
@@ -15,6 +31,7 @@ class FakeDebateLLM:
         *,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        enable_thinking: bool | None = None,
     ) -> LLMCompletion:
         del temperature, max_tokens
         prompt = messages[-1]["content"]

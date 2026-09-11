@@ -15,6 +15,7 @@ const initialState: DebateViewState = {
   phase: "idle",
   sessionId: null,
   rounds: [],
+  pendingRound: null,
   result: null,
   activePersona: null,
   error: null,
@@ -51,12 +52,26 @@ function reducer(state: DebateViewState, action: Action): DebateViewState {
   if (action.event.event === "session_start") {
     return { ...state, sessionId: action.event.data.session_id }
   }
+  if (action.event.event === "round_delta") {
+    const { round_number, speaker, delta } = action.event.data
+    const previous = state.pendingRound
+    const content = previous?.round_number === round_number && previous.speaker === speaker
+      ? previous.content + delta
+      : delta
+    return {
+      ...state,
+      phase: "streaming",
+      pendingRound: { round_number, speaker, content },
+      activePersona: speaker,
+    }
+  }
   if (action.event.event === "round") {
     return {
       ...state,
       phase: "streaming",
       rounds: [...state.rounds, action.event.data.round],
-      activePersona: action.event.data.round.speaker,
+      pendingRound: null,
+      activePersona: null,
     }
   }
   return {
@@ -64,6 +79,7 @@ function reducer(state: DebateViewState, action: Action): DebateViewState {
     phase: "completed",
     sessionId: action.event.data.session_id,
     rounds: action.event.data.rounds,
+    pendingRound: null,
     result: action.event.data.result,
     activePersona: null,
     error: null,

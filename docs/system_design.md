@@ -79,7 +79,7 @@ graph TB
     DAR --> DS[DebateService]
     DS --> LLM
     DS --> MEM[内存 DebateSession]
-    DAR -->|session_start / round / result / error| DEBATE
+    DAR -->|session_start / round_delta / round / result / error| DEBATE
     DEBATE -->|POST 合成结果| TTS[TTSService]
     TTS --> EDGE[edge-tts]
 ```
@@ -133,7 +133,7 @@ classDiagram
     class DebateService {
         +dict sessions
         +start_debate() DebateResponse
-        +_generate_argument() DebateRound
+        +_stream_argument() AsyncGenerator
         +_judge_debate() DebateResult
     }
 
@@ -274,7 +274,7 @@ stateDiagram-v2
     IDLE --> SUBMITTING : 提交辩论偏好
     SUBMITTING --> STREAMING : 收到响应头
     SUBMITTING --> ERROR : HTTP/网络错误
-    STREAMING --> STREAMING : session_start / round
+    STREAMING --> STREAMING : session_start / round_delta / round
     STREAMING --> COMPLETED : 收到并校验 completed/result
     STREAMING --> ERROR : SSE error、整体超时或提前结束
     SUBMITTING --> IDLE : 取消
@@ -366,3 +366,39 @@ client_import、status 为 complete，时间为服务端带时区 UTC。导入�
 `scripts/run_demo.py` 是交付验收工具，不进入生产镜像：新建临时 SQLite、执行现有迁移，覆盖聊天/辩论与 TTS 外部依赖，使用独立 Cookie、绑定回环地址。文本标记为固定样例，音频为生成的 WAV 测试音；不声称模型或语音服务成功。正常启动路径不启用这些替身。
 
 Compose 在服务启动前通过 `python -m alembic upgrade head` 执行迁移，不依赖运行镜像未复制的 CLI 入口。Nginx `try_files $uri $uri/ /index.html` 覆盖所有前端深链接；真实容器启动与路由回退验收结果以 [final-delivery.md](final-delivery.md) 为准。
+
+
+### 辩论实时发言协议与时限
+
+`POST /api/v1/debate/start-stream` 返回 POST SSE。事件顺序为
+`session_start → (round_delta* → round) × 双方轮数 → result`；失败返回终止 `error`，
+不会补发成功结果。`round` 保持原有结构，表示一条发言已完成。
+
+新增 `round_delta` 数据示例：
+
+```json
+{"round_number":1,"speaker":"sichuan_spicy","side":"agent_a","delta":"推荐番茄鸡蛋面。"}
+```
+
+增量经过 Pydantic 校验；浏览器以轮次与角色拼接当前发言，收到 `round` 后替换为完整内容，
+仅完整发言计入进度。取消会关闭上游流；未收到模型结束标志的断流不会保存为完整发言，
+也不会自动重放。客户端仍校验错误、取消及缺少终止结果的提前结束。
+
+每次发言与裁决各有 30 秒生成时限（包括排队与重试），默认整场预算取
+`max(DEBATE_TIMEOUT_SECONDS, (2 × max_rounds + 1) × 30)` 秒，三轮至少 210 秒，
+避免原来七次串行生成挤在 60 秒内。构造服务时显式传入 `timeout_seconds` 仍可设置更短的整场硬上限。
+
+发言提示要求 2–3 句、60–100 字，上限 240 tokens；裁决理由要求 40–60 字，
+整个 JSON 上限 320 tokens。字数是生成目标，token 上限是硬限制。
+辩论发言与裁决显式传入 `enable_thinking=false`，自由聊天维持原参数默认值。
+参数依据：[硅基流动 Chat Completions API](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
+
+### TTS 错误契约与配置
+
+`POST /api/v1/tts/synthesize` 与 `POST /api/v1/tts/synthesize-debate-result`
+成功时仍返回 `audio/mpeg`；失败统一返回 `{"detail":"安全的可读错误信息"}`。
+上游拒绝连接/网络失败返回 503，整体超时返回 504，空音频或协议异常返回 502，
+无效输入返回 422，未知内部异常返回 500，不再向浏览器透传原始异常 URL。
+`TTSRequest` / `TTSResponse` 定义归入 `src/backend/models.py`；现有前端按 `detail`
+展示错误，无需修改 TypeScript 请求或响应结构。
+依赖升级为 `edge-tts==7.2.8`，配置与手动检查步骤见 [TTS 排查指南](tts-troubleshooting.md)。

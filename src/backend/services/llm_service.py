@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from time import monotonic
 from typing import Any, Literal
@@ -81,6 +81,7 @@ class _UpstreamChatRequest(BaseModel):
     temperature: float = Field(ge=0, le=2)
     max_tokens: int = Field(ge=1, le=8192)
     stream: bool
+    enable_thinking: bool | None = None
 
 
 class _UpstreamMessage(BaseModel):
@@ -171,9 +172,16 @@ class LLMService:
         *,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        enable_thinking: bool | None = None,
     ) -> LLMCompletion:
         """Request and validate a non-streaming chat completion."""
-        payload = self._payload(messages, temperature, max_tokens, stream=False)
+        payload = self._payload(
+            messages,
+            temperature,
+            max_tokens,
+            stream=False,
+            enable_thinking=enable_thinking,
+        )
         async with self._request_slot():
             raw = await self._with_retry(self._post_json_once, payload)
         try:
@@ -195,9 +203,16 @@ class LLMService:
         *,
         temperature: float = 0.7,
         max_tokens: int = 1024,
-    ) -> AsyncIterator[LLMStreamChunk]:
+        enable_thinking: bool | None = None,
+    ) -> AsyncGenerator[LLMStreamChunk, None]:
         """Yield validated text deltas from a real upstream HTTP stream."""
-        payload = self._payload(messages, temperature, max_tokens, stream=True)
+        payload = self._payload(
+            messages,
+            temperature,
+            max_tokens,
+            stream=True,
+            enable_thinking=enable_thinking,
+        )
         async with self._request_slot():
             client, response = await self._with_retry(self._open_stream_once, payload)
             try:
@@ -270,6 +285,7 @@ class LLMService:
         max_tokens: int,
         *,
         stream: bool,
+        enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         self.ensure_configured()
         try:
@@ -282,6 +298,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
+                enable_thinking=enable_thinking,
             )
         except ValidationError as exc:
             raise LLMServiceError(
@@ -289,7 +306,7 @@ class LLMService:
                 "服务端生成了无效的模型请求",
                 status_code=500,
             ) from exc
-        return request.model_dump()
+        return request.model_dump(exclude_none=True)
 
     @asynccontextmanager
     async def _request_slot(self) -> AsyncIterator[None]:

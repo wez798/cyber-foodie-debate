@@ -156,6 +156,15 @@ class DebateRoundData(BaseModel):
     side: Literal["agent_a", "agent_b"]
 
 
+class DebateRoundDeltaData(BaseModel):
+    """Validated incremental public speech, before a completed round."""
+
+    round_number: int = Field(ge=1)
+    speaker: AgentPersona
+    side: Literal["agent_a", "agent_b"]
+    delta: str = Field(min_length=1)
+
+
 class DebateResultData(BaseModel):
     """Data emitted only after a debate completes successfully."""
 
@@ -538,3 +547,20 @@ class CloudChatStreamError(BaseModel):
     conversation_id: UUID
     assistant_message_id: UUID
     error: ChatErrorDetail
+
+
+class TTSRequest(BaseModel):
+    """TTS 合成请求。"""
+
+    text: str = Field(..., description="待合成文本", min_length=1, max_length=2000)
+    voice: str | None = Field(None, description="语音角色，默认使用配置值")
+    rate: str | None = Field(None, description="语速，如 +10%")
+    pitch: str | None = Field(None, description="音调，如 +5Hz")
+
+
+class TTSResponse(BaseModel):
+    """TTS 合成响应。"""
+
+    status: str
+    audio_format: str = "mp3"
+    message: str

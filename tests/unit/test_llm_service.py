@@ -54,12 +54,14 @@ def test_non_stream_completion_uses_expected_model_and_auth():
     assert isinstance(payload, dict)
     assert payload["model"] == "deepseek-ai/DeepSeek-V4-Flash"
     assert payload["stream"] is False
+    assert "enable_thinking" not in payload
 
 
 def test_stream_completion_yields_incremental_text():
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["stream"] is True
+        assert payload["enable_thinking"] is False
         return httpx.Response(
             200,
             headers={"Content-Type": "text/event-stream"},
@@ -83,7 +85,7 @@ def test_stream_completion_yields_incremental_text():
         return [
             chunk
             async for chunk in service.stream(
-                [{"role": "user", "content": "推荐一道菜"}]
+                [{"role": "user", "content": "推荐一道菜"}], enable_thinking=False
             )
         ]
 

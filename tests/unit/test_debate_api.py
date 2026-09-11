@@ -1,19 +1,48 @@
 """FastAPI contract tests for terminal debate failures."""
 
+import pytest
+from sse_starlette.sse import AppStatus
+
 from fastapi.testclient import TestClient
+
+from collections.abc import AsyncGenerator
 
 from src.backend.app import create_app
 from src.backend.services.debate_service import DebateService, get_debate_service
-from src.backend.services.llm_service import LLMCompletion, LLMServiceError
+from src.backend.services.llm_service import (
+    LLMStreamChunk,
+    LLMCompletion,
+    LLMServiceError,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_sse_exit_event(monkeypatch):
+    monkeypatch.setattr(AppStatus, "should_exit_event", None)
 
 
 class FailingLLM:
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        enable_thinking: bool | None = None,
+    ) -> AsyncGenerator[LLMStreamChunk, None]:
+        completion = await self.complete(
+            messages, temperature=temperature, max_tokens=max_tokens
+        )
+        yield LLMStreamChunk(delta=completion.content)
+        yield LLMStreamChunk(finish_reason="stop")
+
     async def complete(
         self,
         messages: list[dict[str, str]],
         *,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        enable_thinking: bool | None = None,
     ) -> LLMCompletion:
         del messages, temperature, max_tokens
         raise LLMServiceError(
@@ -60,3 +89,18 @@ def test_stream_failure_emits_error_without_result() -> None:
     assert "event: error" in response.text
     assert "service_unavailable" in response.text
     assert "event: result" not in response.text
+
+
+def test_stream_serializes_deltas_before_round_and_result() -> None:
+    from tests.unit.test_debate_service import IncrementalLLM
+
+    app = create_app()
+    service = DebateService(llm=IncrementalLLM())
+    app.dependency_overrides[get_debate_service] = lambda: service
+    response = TestClient(app).post("/api/v1/debate/start-stream", json=request_body())
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.text.index("event: round_delta") < response.text.index(
+        "event: round\r"
+    )
+    assert response.text.index("event: round\r") < response.text.index("event: result")
+    assert '"delta":"推荐"' in response.text

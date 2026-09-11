@@ -47,6 +47,13 @@ export interface RoundData {
   side: "agent_a" | "agent_b"
 }
 
+export interface RoundDeltaData {
+  round_number: number
+  speaker: AgentPersona
+  side: "agent_a" | "agent_b"
+  delta: string
+}
+
 export interface ResultData {
   session_id: string
   status: "completed"
@@ -67,6 +74,7 @@ export interface DebateStreamErrorData {
 export type DebateStreamEvent =
   | { event: "session_start"; data: SessionStartData }
   | { event: "round"; data: RoundData }
+  | { event: "round_delta"; data: RoundDeltaData }
   | { event: "result"; data: ResultData }
   | { event: "error"; data: DebateStreamErrorData }
 
@@ -74,6 +82,7 @@ export interface DebateViewState {
   phase: DebatePhase
   sessionId: string | null
   rounds: DebateRound[]
+  pendingRound?: DebateRound | null
   result: DebateResult | null
   activePersona: AgentPersona | null
   error: string | null

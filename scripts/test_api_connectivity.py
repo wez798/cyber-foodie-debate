@@ -4,14 +4,13 @@ Run this module manually. It is deliberately excluded from pytest collection
 because it consumes real external services and requires local credentials.
 """
 
+import argparse
 import asyncio
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
-import edge_tts
 import httpx
 
 from src.backend.config import settings
+from src.backend.services.tts_service import TTSServiceError, tts_service
 
 __test__ = False
 
@@ -51,37 +50,39 @@ async def check_llm_api() -> bool:
 
 
 async def check_tts_api() -> bool:
-    """Check edge-tts with an automatically cleaned temporary file."""
+    """Check the configured TTS path with fixed text, without calling an LLM."""
     print("🔍 测试微软 edge-tts...")
     try:
-        with TemporaryDirectory(prefix="cyber-foodie-tts-") as temp_dir:
-            output_path = Path(temp_dir) / "connectivity.mp3"
-            communicate = edge_tts.Communicate("测试", settings.tts_voice)
-            await communicate.save(str(output_path))
-            if output_path.is_file() and output_path.stat().st_size > 0:
-                print("✅ TTS 服务连通成功")
-                return True
+        audio = await tts_service.synthesize("测试")
+        if audio:
+            print(f"✅ TTS 服务连通成功（收到 {len(audio)} 字节音频）")
+            return True
+    except TTSServiceError as error:
+        print(f"❌ TTS 服务连接失败: {error}")
     except Exception as error:
         print(f"❌ TTS 服务连接异常: {type(error).__name__}")
     return False
 
 
-async def main() -> bool:
+async def main(service: str = "all") -> bool:
     """Run all explicit external checks and return their combined result."""
     print("=" * 40)
     print("Cyber Foodie Debate - API 连通性测试")
     print("=" * 40)
 
-    llm_ok = await check_llm_api()
-    tts_ok = await check_tts_api()
+    llm_ok = await check_llm_api() if service in {"all", "llm"} else True
+    tts_ok = await check_tts_api() if service in {"all", "tts"} else True
 
     print("\n" + "=" * 40)
     if llm_ok and tts_ok:
-        print("🎉 所有 API 连通测试通过！")
+        print("🎉 所选服务连通测试通过！")
         return True
     print("⚠️ 部分 API 未通过，请检查本地配置或网络。")
     return False
 
 
 if __name__ == "__main__":
-    raise SystemExit(0 if asyncio.run(main()) else 1)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--service", choices=("all", "llm", "tts"), default="all")
+    args = parser.parse_args()
+    raise SystemExit(0 if asyncio.run(main(args.service)) else 1)

@@ -140,3 +140,36 @@ def step_then_price_in_budget(context, budget) -> None:
     result = context.response.result
     assert result is not None
     assert result.dish_name == EXPECTED_DISHES[budget]
+
+
+@when("用户以流式方式开始辩论")
+def step_stream_debate(context) -> None:
+    async def collect():
+        request = DebateRequest(
+            preference=FoodPreference(**context.preference), max_rounds=1
+        )
+        return [
+            update async for update in context.debate_service.stream_debate(request)
+        ]
+
+    context.updates = asyncio.run(collect())
+
+
+@then("首段观点应在完整发言与裁决之前到达")
+def step_delta_before_round(context) -> None:
+    from src.backend.models import (
+        DebateRoundDeltaData,
+        DebateRoundData,
+        DebateResultData,
+    )
+
+    updates = context.updates
+    first_delta = next(
+        i for i, u in enumerate(updates) if isinstance(u, DebateRoundDeltaData)
+    )
+    first_round = next(
+        i for i, u in enumerate(updates) if isinstance(u, DebateRoundData)
+    )
+    result = next(i for i, u in enumerate(updates) if isinstance(u, DebateResultData))
+    assert first_delta < first_round < result
+    assert updates[first_delta].delta
